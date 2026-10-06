@@ -20,6 +20,7 @@ namespace WallDistance.Core
         /// <summary>RMS distance of supporting points from the fitted line, metres.</summary>
         public float rms;
         public MeasurementSource source = MeasurementSource.LearnedDepth;
+        public bool calibratedFromRawDepth;
         public float edgeSnapFraction = float.NaN;
         public double timestamp;
 

@@ -131,7 +131,10 @@ namespace WallDistance.Core
             // The step between indices found and found+1 sits at offset (found - band) + 0.5.
             float offset = found - band + 0.5f + delta;
             Vector2 q = P + nrm * offset;
-            return floor.TryIntersect(img.cameraPose.position, img.WorldRay(q.x, q.y), out hit, out _);
+            if (!floor.TryIntersect(img.cameraPose.position, img.WorldRay(q.x, q.y), out hit, out _)) return false;
+            // Pixel rounding and the two-pixel sampling footprint can exceed the projected band,
+            // especially at a grazing floor view. Enforce the real cap on the back-projected hit.
+            return Mathf.Abs(Vector3.Dot(hit - p, n)) <= _cfg.edgeMaxShiftMeters + 1e-4f;
         }
 
         static bool TryLuma(InverseDepthImage img, Vector2 p, out float value)

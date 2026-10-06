@@ -133,12 +133,14 @@ namespace WallDistance.Core
             switch (obs.source)
             {
                 case MeasurementSource.FloorEdge:
+                    t.calibratedFromRawDepth = false;
                     t.lastFloorEdgeTime = now;
                     t.lastLearnedTime = now;
                     t.lastLearnedPoint = foot;
                     t.edgeSnapFraction = obs.edgeSnapFraction;
                     break;
                 case MeasurementSource.LearnedDepth:
+                    t.calibratedFromRawDepth = obs.calibratedFromRawDepth;
                     t.lastLearnedTime = now;
                     t.lastLearnedPoint = foot;
                     break;
@@ -199,6 +201,7 @@ namespace WallDistance.Core
                 c.Set(t.id, true, t.origin, Quaternion.LookRotation(t.up, t.normal), _poly);
                 c.source = t.Source(now, D.sourceWindowSeconds);
                 c.crossChecked = t.crossChecked;
+                c.calibratedFromRawDepth = t.calibratedFromRawDepth;
                 _candidates.Add(c);
             }
             return _candidates;
@@ -216,6 +219,9 @@ namespace WallDistance.Core
             {
                 Quaternion dq = anchor.rotation * Quaternion.Inverse(t.anchorReference.rotation);
                 t.origin = anchor.position + dq * (t.origin - t.anchorReference.position);
+                // Source comparisons must stay in the same corrected frame as the wall itself.
+                t.lastLearnedPoint = anchor.position + dq * (t.lastLearnedPoint - t.anchorReference.position);
+                t.lastArPlanePoint = anchor.position + dq * (t.lastArPlanePoint - t.anchorReference.position);
                 // Keep the wall vertical even if the anchor's correction carries a tiny tilt.
                 if (Horizontal.TryDirection(dq * t.normal, t.up, out Vector3 n)) t.normal = n;
             }

@@ -21,6 +21,8 @@ namespace WallDistance.Core
         /// within MeasurementConfig.crossCheckToleranceMeters. Always false for raw AR planes.
         /// </summary>
         public bool crossChecked;
+        /// <summary>Learned metric scale used raw depth, so that raw depth cannot independently validate it.</summary>
+        public bool calibratedFromRawDepth;
 
         /// <summary>True only while the provider reports the plane as actively tracked.</summary>
         public bool isTracked;

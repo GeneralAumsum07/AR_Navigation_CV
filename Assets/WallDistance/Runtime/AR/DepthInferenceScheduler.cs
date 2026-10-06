@@ -30,6 +30,9 @@ namespace WallDistance.AR
         public FloorPlaneSource floorSource;
 
         public IDepthInference Backend { get; set; }
+        public Func<IDepthInference> BackendFactory { get; set; }
+        /// <summary>Set by the service on every session change; stamped on capture, never on collection.</summary>
+        public string SessionId { get; set; }
         public InferenceRateGovernor Governor { get; } = new InferenceRateGovernor();
         public event Action<InverseDepthImage> FrameReady;
 
@@ -66,11 +69,19 @@ namespace WallDistance.AR
             if (floorSource == null) floorSource = FindAnyObjectByType<FloorPlaneSource>();
         }
 
-        void OnEnable() { if (cameraManager != null) cameraManager.frameReceived += OnCameraFrame; }
+        void OnEnable()
+        {
+            if (Backend == null && BackendFactory != null) Backend = BackendFactory();
+            if (cameraManager != null) cameraManager.frameReceived += OnCameraFrame;
+        }
 
         void OnDisable()
         {
             if (cameraManager != null) cameraManager.frameReceived -= OnCameraFrame;
+            // Disabling the host stops its coroutine too; the backend's task owner must still
+            // release an initialization that finishes after this callback.
+            Backend?.Dispose();
+            Backend = null;
         }
 
         void OnDestroy()
@@ -118,6 +129,7 @@ namespace WallDistance.AR
                 Resample(image.width, image.height, geo, target.luma);
                 target.intrinsics = geo.Intrinsics(sensorIntr);
                 target.cameraPose = geo.CameraPose(sensorPose);
+                  target.sessionId = SessionId;
                 target.timestamp = now;
                 target.content = geo.content;
                 target.inferenceMilliseconds = double.NaN;

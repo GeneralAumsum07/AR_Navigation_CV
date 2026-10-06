@@ -22,7 +22,7 @@ namespace WallDistance.Tests
             p.ProcessFrame("s1", Frame(pose, 1.0), SyntheticCorridor.Floor, null, 1.03);
             Assert.AreEqual(FailureReason.None, p.LastFailure);
             Assert.GreaterOrEqual(p.Map.Tracks.Count, 3);
-            Assert.AreEqual(30.0, p.LastDetectLatencyMs, 1e-6);
+            Assert.AreEqual(30.0 + p.LastProcessingMs, p.LastDetectLatencyMs, 1e-6);
             bool found = false;
             foreach (var t in p.Map.Tracks)
                 if (Vector3.Angle(t.normal, Vector3.left) < 1f && Mathf.Abs(t.SignedDistance(pose.position) - 0.8f) <= 0.02f) found = true;

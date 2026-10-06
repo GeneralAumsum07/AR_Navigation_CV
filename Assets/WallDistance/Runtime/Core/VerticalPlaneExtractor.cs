@@ -17,6 +17,7 @@ namespace WallDistance.Core
         readonly List<Vector3> _world = new List<Vector3>(20000);
         readonly List<int> _active = new List<int>(20000), _inl = new List<int>(20000);
         readonly List<float> _tmp = new List<float>(20000);
+          readonly List<int> _support = new List<int>(20000);
         bool[] _taken = new bool[0];
 
         public VerticalPlaneExtractor(DetectionConfig cfg) { _cfg = cfg ?? new DetectionConfig(); }
@@ -68,12 +69,40 @@ namespace WallDistance.Core
                 RemoveInliers();
                 if (_inl.Count < _cfg.minPlaneInliers) continue;
 
-                var obs = Build(n, c, rms, up, e1, e2, floor, floorLevel, img.cameraPose.position, now);
-                if (obs == null) continue;
-                output.Add(obs);
-                found++;
+                found += EmitSections(n, c, rms, up, e1, e2, floor, floorLevel,
+                    img.cameraPose.position, now, output, _cfg.maxPlanes - found);
             }
             return output.Count;
+        }
+
+        int EmitSections(Vector2 n, float c, float rms, Vector3 up, Vector3 e1, Vector3 e2,
+            FloorPlane floor, float floorLevel, Vector3 cam, double now, List<WallObservation> output, int budget)
+        {
+            // A line fit establishes orientation, not continuous wall support. Bounding all
+            // collinear points fills openings, so form connected intervals before making extents.
+            Vector3 along = Vector3.Cross(n.x * e1 + n.y * e2, up);
+            _support.Clear();
+            _support.AddRange(_inl);
+            _support.Sort((a, b) => Vector3.Dot(_world[a], along).CompareTo(Vector3.Dot(_world[b], along)));
+            _inl.Clear();
+            int emitted = 0;
+            float previous = float.NaN;
+            for (int k = 0; k <= _support.Count; k++)
+            {
+                bool end = k == _support.Count;
+                float value = end ? 0f : Vector3.Dot(_world[_support[k]], along);
+                if (end || (!float.IsNaN(previous) && value - previous > _cfg.planeSplitGapMeters))
+                {
+                    if (_inl.Count >= _cfg.minPlaneInliers && emitted < budget)
+                    {
+                        var observation = Build(n, c, rms, up, e1, e2, floor, floorLevel, cam, now);
+                        if (observation != null) { output.Add(observation); emitted++; }
+                    }
+                    _inl.Clear();
+                }
+                if (!end) { _inl.Add(_support[k]); previous = value; }
+            }
+            return emitted;
         }
 
         void CollectPoints(InverseDepthImage img, AlignmentResult align, FloorPlane floor, Vector3 up, Vector3 e1, Vector3 e2, float floorLevel)

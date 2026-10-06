@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using UnityEngine;
@@ -17,6 +18,8 @@ namespace WallDistance.Core
         readonly BaseEdgeRefiner _refiner;
         readonly List<WallObservation> _obs = new List<WallObservation>(8);
         readonly Stopwatch _watch = new Stopwatch();
+        readonly Action<WallMap> _beforeObservations;
+        string _sessionId;
         double _lastArObserve = double.NegativeInfinity;
 
         public WallMap Map { get; }
@@ -24,15 +27,16 @@ namespace WallDistance.Core
         public int LastObservationCount { get; private set; }
         public float LastEdgeSnapFraction { get; private set; } = float.NaN;
         public double LastProcessingMs { get; private set; } = double.NaN;
-        /// <summary>Camera-image-to-map latency of the last processed frame, ms.</summary>
+        /// <summary>Image arrival-to-map latency, including CPU processing, ms. Sensor-clock delay is not measured.</summary>
         public double LastDetectLatencyMs { get; private set; } = double.NaN;
         /// <summary>Image timestamp of the last processed frame; NaN before the first.</summary>
         public double LastFrameTime { get; private set; } = double.NaN;
         public FailureReason LastFailure { get; private set; } = FailureReason.None;
 
-        public WallDetectionPipeline(MeasurementConfig cfg)
+        public WallDetectionPipeline(MeasurementConfig cfg, Action<WallMap> beforeObservations = null)
         {
             _cfg = cfg ?? new MeasurementConfig();
+            _beforeObservations = beforeObservations;
             _aligner = new FloorAlignedDepth(_cfg.detection);
             _extractor = new VerticalPlaneExtractor(_cfg.detection);
             _refiner = new BaseEdgeRefiner(_cfg.detection);
@@ -41,10 +45,15 @@ namespace WallDistance.Core
 
         public void ProcessFrame(string sessionId, InverseDepthImage img, FloorPlane floor, IReadOnlyList<MetricSample> metric, double now)
         {
+            SetSession(sessionId);
+            // A worker may finish after reset or long after capture. Neither result is fresh
+            // geometry in this frame. Null session stamps remain supported for offline replays.
+            if (img == null || (!string.IsNullOrEmpty(img.sessionId) && img.sessionId != sessionId)
+                || double.IsNaN(img.timestamp) || now < img.timestamp
+                || now - img.timestamp > _cfg.detection.staleAfterSeconds) return;
             _watch.Restart();
-            Map.SetSession(sessionId);
+            _beforeObservations?.Invoke(Map);
             LastFrameTime = img.timestamp;
-            LastDetectLatencyMs = (now - img.timestamp) * 1000.0;
 
             var align = _aligner.Align(img, floor, metric);
             LastAlignment = align;
@@ -54,7 +63,7 @@ namespace WallDistance.Core
             {
                 // Keep the map: a frame that cannot be scaled says nothing about walls already found.
                 LastFailure = align.failure;
-                LastProcessingMs = _watch.Elapsed.TotalMilliseconds;
+                CompleteTiming(now, img.timestamp);
                 return;
             }
 
@@ -64,6 +73,7 @@ namespace WallDistance.Core
             for (int i = 0; i < _obs.Count; i++)
             {
                 var o = _obs[i];
+                o.calibratedFromRawDepth = align.usedMetricSamples;
                 // Edges only refine walls scaled from the floor: without the floor plane there
                 // is no metric back-projection for the edge.
                 if (!align.usedMetricSamples && _refiner.TryRefine(img, floor, o, out var refined))
@@ -77,7 +87,22 @@ namespace WallDistance.Core
             LastObservationCount = _obs.Count;
             if (snapped > 0) LastEdgeSnapFraction = snapSum / snapped;
             LastFailure = _obs.Count == 0 ? FailureReason.NoWallInView : FailureReason.None;
+            CompleteTiming(now, img.timestamp);
+        }
+
+        void CompleteTiming(double now, double arrival)
+        {
+            _watch.Stop();
             LastProcessingMs = _watch.Elapsed.TotalMilliseconds;
+            LastDetectLatencyMs = (now - arrival) * 1000.0 + LastProcessingMs;
+        }
+
+        public void SetSession(string sessionId)
+        {
+            if (_sessionId == sessionId) return;
+            Reset();
+            _sessionId = sessionId;
+            Map.SetSession(sessionId);
         }
 
         /// <summary>
@@ -86,9 +111,10 @@ namespace WallDistance.Core
         /// </summary>
         public void ObserveArPlanes(string sessionId, IReadOnlyList<WallCandidate> planes, Vector3 up, double now)
         {
+            SetSession(sessionId);
             if (planes == null || now - _lastArObserve < _cfg.detection.arPlaneObserveIntervalSeconds) return;
             _lastArObserve = now;
-            Map.SetSession(sessionId);
+            _beforeObservations?.Invoke(Map);
             for (int i = 0; i < planes.Count; i++)
             {
                 var c = planes[i];
@@ -113,6 +139,7 @@ namespace WallDistance.Core
 
         public void Reset()
         {
+            _sessionId = null;
             Map.Clear();
             LastAlignment = null;
             LastObservationCount = 0;

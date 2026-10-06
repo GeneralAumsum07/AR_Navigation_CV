@@ -23,6 +23,7 @@ namespace WallDistance.Core
         public Vector3 lastLearnedPoint, lastArPlanePoint;
         /// <summary>Learned and ARCore sources agreed recently; refreshed by WallMap.Candidates/Prune.</summary>
         public bool crossChecked;
+        public bool calibratedFromRawDepth;
         public float edgeSnapFraction = float.NaN;
 
         internal bool hasAnchorReference;

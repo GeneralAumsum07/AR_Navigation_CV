@@ -40,7 +40,9 @@ namespace WallDistance.AR
         [DllImport(Lib)] static extern void wd_shutdown();
 
         volatile bool _available, _disposed;
-        bool _initialised, _busy;
+        bool _busy;
+        AsyncInitialization _initialization;
+        UnityWebRequest _modelRequest;
         InverseDepthImage _pending;
         readonly byte[] _msg = new byte[512];
 
@@ -77,8 +79,11 @@ namespace WallDistance.AR
                 string src = Path.Combine(Application.streamingAssetsPath, "Models", modelFileName);
                 using (var req = UnityWebRequest.Get(src))
                 {
+                    _modelRequest = req;
                     req.downloadHandler = new DownloadHandlerFile(dest) { removeFileOnAbort = true };
                     yield return req.SendWebRequest();
+                    _modelRequest = null;
+                    if (_disposed) yield break;
                     if (req.result != UnityWebRequest.Result.Success)
                     {
                         Status = $"model missing from the APK ({modelFileName}): {req.error}";
@@ -96,8 +101,10 @@ namespace WallDistance.AR
             Status = "loading model on the NPU";
             var err = new byte[512];
             // The worker owns err until it completes; this coroutine only reads it afterwards.
-            var init = Task.Run(() => wd_init(dest, libDir, err, err.Length));
+            _initialization = new AsyncInitialization(() => wd_init(dest, libDir, err, err.Length), wd_shutdown);
+            var init = _initialization.Completion;
             while (!init.IsCompleted) yield return null;
+            if (_disposed) yield break;
             if (init.IsFaulted)
             {
                 // DllNotFoundException / EntryPointNotFoundException: the APK lacks libwalldepth.so.
@@ -105,9 +112,6 @@ namespace WallDistance.AR
                 yield break;
             }
             if (init.Result != 0) { Status = "QNN init failed: " + Decode(err); yield break; }
-            _initialised = true;
-            if (_disposed) { Shutdown(); yield break; }
-
             int size = DepthInferenceScheduler.Size;
             if (wd_input_size() != size * size * 3 || wd_output_size() != size * size)
             {
@@ -137,12 +141,18 @@ namespace WallDistance.AR
         public bool TryCollect(out InverseDepthImage image)
         {
             image = null;
-            if (!_busy) return false;
+            if (_disposed || !_busy) return false;
             var target = _pending;
             int rc = wd_poll(target.values, target.values.Length, out double ms);
             if (rc == 0) return false;
             _busy = false;
             _pending = null;
+            if (_modelRequest != null)
+            {
+                _modelRequest.Abort();
+                _modelRequest.Dispose();
+                _modelRequest = null;
+            }
             if (rc < 0) { Fail("inference"); return false; }
             target.inferenceMilliseconds = ms;
             target.MaskOutsideContent();
@@ -160,16 +170,19 @@ namespace WallDistance.AR
 
         public void Dispose()
         {
-            // If init is still running, Setup sees _disposed when it finishes and shuts down then.
+            // Cleanup belongs to the task owner, not to Setup: Unity may stop the coroutine
+            // permanently when its GameObject is disabled or destroyed.
             _disposed = true;
             _available = false;
-            if (_initialised) Shutdown();
+            _busy = false;
+            _pending = null;
+            Shutdown();
         }
 
         void Shutdown()
         {
-            _initialised = false;
-            wd_shutdown();
+            _available = false;
+            _initialization?.Dispose();
         }
 
         static string Decode(byte[] buf)

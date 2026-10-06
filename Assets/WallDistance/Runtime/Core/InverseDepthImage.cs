@@ -19,6 +19,8 @@ namespace WallDistance.Core
         public DepthIntrinsics intrinsics;
         /// <summary>Pose of the (rotated, upright) inference camera when the image was captured.</summary>
         public Pose cameraPose;
+        /// <summary>Session frame in which this image was captured; preserved while inference is pending.</summary>
+        public string sessionId;
         /// <summary>Seconds since app start when the camera image arrived.</summary>
         public double timestamp;
         /// <summary>Pixels that come from the camera; everything else is letterbox padding.</summary>

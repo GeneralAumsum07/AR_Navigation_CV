@@ -88,7 +88,8 @@ namespace WallDistance.AR
                 if (cm != null) arCamera = cm.GetComponent<Camera>();
             }
             Engine = new WallMeasurementEngine(config);
-            Pipeline = new WallDetectionPipeline(config);
+            // Both inference and AR-plane paths correct the retained map BEFORE fusing new-world data.
+            Pipeline = new WallDetectionPipeline(config, map => _anchoring?.Sync(map));
             // Anchors need an anchor manager on the XR Origin; the scene does not have one.
             if (GetComponent<ARAnchorManager>() == null) gameObject.AddComponent<ARAnchorManager>();
             _anchoring = new WallMapAnchoring(transform);
@@ -102,21 +103,32 @@ namespace WallDistance.AR
             if (scheduler == null) scheduler = GetComponent<DepthInferenceScheduler>();
             if (scheduler == null) scheduler = gameObject.AddComponent<DepthInferenceScheduler>();
             scheduler.floorSource = floorSource;
+            scheduler.SessionId = SessionId;
+            scheduler.BackendFactory = () => QnnDepthInference.Create(this, modelFileName);
             // Real backend; until its async setup finishes it reports unavailable and the ARCore path runs.
             scheduler.Backend?.Dispose();
-            scheduler.Backend = QnnDepthInference.Create(this, modelFileName);
+            scheduler.Backend = scheduler.BackendFactory();
         }
 
         void OnEnable()
         {
             ARSession.stateChanged += OnArStateChanged;
-            if (scheduler != null) scheduler.FrameReady += OnInferenceFrame;
+            if (scheduler != null)
+            {
+                if (scheduler.Backend == null && scheduler.BackendFactory != null) scheduler.Backend = scheduler.BackendFactory();
+                scheduler.FrameReady += OnInferenceFrame;
+            }
         }
 
         void OnDisable()
         {
             ARSession.stateChanged -= OnArStateChanged;
-            if (scheduler != null) scheduler.FrameReady -= OnInferenceFrame;
+            if (scheduler != null)
+            {
+                scheduler.FrameReady -= OnInferenceFrame;
+                scheduler.Backend?.Dispose();
+                scheduler.Backend = null;
+            }
         }
 
         void OnArStateChanged(ARSessionStateChangedEventArgs args)
@@ -146,6 +158,8 @@ namespace WallDistance.AR
         /// </summary>
         void OnInferenceFrame(InverseDepthImage img)
         {
+            UpdateSessionState();
+            if (img == null || img.sessionId != SessionId) return;
             if (State != WallDistanceSessionState.Tracking || Assisted.Active) return;
             double now = Time.realtimeSinceStartupAsDouble;
             FloorPlane floor = floorSource != null && floorSource.HasFloor ? floorSource.CurrentPlane : default;
@@ -160,6 +174,9 @@ namespace WallDistance.AR
         void NewSessionId()
         {
             SessionId = Guid.NewGuid().ToString("N").Substring(0, 8);
+            Pipeline?.SetSession(SessionId);
+            _anchoring?.Clear();
+            if (scheduler != null) scheduler.SessionId = SessionId;
         }
 
         void Update()
@@ -183,12 +200,11 @@ namespace WallDistance.AR
             Vector3 up = floorSource != null && floorSource.HasFloor ? floorSource.CurrentPlane.up : Vector3.up;
 
             // A session change empties the map before anything reads it, not at the next inference.
-            Pipeline.Map.SetSession(SessionId);
+            Pipeline.SetSession(SessionId);
             if (tracking && automatic)
             {
                 Pipeline.ObserveArPlanes(SessionId, candidateSource.Candidates, up, now);
                 Pipeline.Map.Prune(now);
-                _anchoring.Sync(Pipeline.Map);
             }
 
             // Automatic mode measures against the map (learned walls plus ARCore planes folded in at

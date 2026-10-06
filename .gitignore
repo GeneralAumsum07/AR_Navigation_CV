@@ -49,6 +49,8 @@ mono_crash.*
 /.utmp/
 /.remember/
 /.obsidian/
+/.superpowers/
+/docs/superpowers/
 .claude/
 
 # ML model weights are fetched by a script (see spec), not committed.

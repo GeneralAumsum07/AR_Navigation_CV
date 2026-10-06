@@ -402,7 +402,11 @@ namespace WallDistance.Core
             var v = _validator.Validate(c, input.depth, config, input.now);
             r.depthResidualMeters = v.medianResidualMeters;
             r.depthInlierFraction = v.inlierFraction;
-            bool rawAgrees = v.depthUsed
+            bool confidentRaw = input.depth != null && input.depth.confidence != null
+                && input.depth.confidence.Length >= input.depth.width * input.depth.height;
+            // A calibration source agreeing with its own fitted scale is not a second source.
+            // Missing confidence also cannot supply evidence (DepthFrame's null default is legacy).
+            bool rawAgrees = !c.calibratedFromRawDepth && confidentRaw && v.depthUsed
                              && Mathf.Abs(v.medianResidualMeters) <= config.crossCheckToleranceMeters
                              && v.inlierFraction >= config.depthMinInlierFraction;
             r.source = c.source;
@@ -419,7 +423,9 @@ namespace WallDistance.Core
                 r.quality = c.source == MeasurementSource.FloorEdge ? QualityLabel.EdgeConfirmed : QualityLabel.LearnedEstimate;
                 r.qualityReason = v.depthUsed
                     ? $"raw depth differs by {Mathf.Abs(v.medianResidualMeters) * 100f:F0} cm (not used on plain walls)"
-                    : c.source == MeasurementSource.FloorEdge ? "base snapped to the floor edge" : "learned depth scaled to the floor";
+                    : c.source == MeasurementSource.FloorEdge ? "base snapped to the floor edge"
+                    : c.calibratedFromRawDepth ? "learned depth scaled from raw depth (not an independent cross-check)"
+                    : "learned depth scaled to the floor";
             }
             ApplyRangeLabel(ref r);
         }

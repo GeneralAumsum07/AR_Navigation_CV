@@ -50,6 +50,13 @@ int main(int argc, char** argv)
         if (r == 0) {
             for (size_t i = 0; i < out.size(); ++i) {
                 if (!std::isfinite(expected[i])) continue;
+                // NaN comparisons do not increase maxDiff. Refuse them explicitly so an invalid
+                // plugin output cannot pass against a finite qnn-net-run reference by accident.
+                if (!std::isfinite(out[i])) {
+                    std::fprintf(stderr, "non-finite plugin output at pixel %zu\n", i);
+                    wd_shutdown();
+                    return 1;
+                }
                 lo = std::min(lo, expected[i]);
                 hi = std::max(hi, expected[i]);
                 maxDiff = std::max(maxDiff, std::fabs(out[i] - expected[i]));

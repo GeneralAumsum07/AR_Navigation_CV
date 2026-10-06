@@ -59,6 +59,8 @@ namespace WallDistance.Core
         [Tooltip("Numerical refit floor; noisy observations use the larger median-residual band.")]
         public float planeRefitMinMeters = 0.001f;
         public float planeRefitResidualMultiplier = 2.5f;
+        [Tooltip("Along-wall support gaps larger than this stay as separate observed sections.")]
+        public float planeSplitGapMeters = 0.5f;
         public int minPlaneInliers = 150;
         public float minHeightSpanMeters = 0.3f;
         public float minLengthMeters = 0.4f;
