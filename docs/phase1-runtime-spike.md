@@ -58,6 +58,14 @@ The input's real value range is [0, 1]. QNN scale-offset encoding uses the negat
 - Working days blocked so far: one verified day. TBD — what is the actual first blocked working day? The three-day threshold has not been established.
 - Blockers still open: authenticated pinned SDK access, redistribution licence clause, context generation, native header compilation, DSP skeleton loading and device verification.
 - Unblocking actions taken: verified the SDK is absent, attempted the official anonymous download, fetched and verified both pinned model archives, implemented packaging guards and offline contract/conversion tests. TBD — has Rachit signed in to Qualcomm Software Center and obtained the pinned SDK?
-- Decision (Rachit): TBD — stay on QNN or switch to LiteRT if packaging remains blocked for three working days? No backend switch has been made.
+- Decision (Rachit): stay on QNN and use QAIRT 2.51, verifying compatibility — 2026-10-06. No LiteRT backend switch has been made.
 
 Task 23 is a decision gate, with no implementation to run. Rachit's physical-test waiver permits the remaining code tasks; it does not establish NPU performance or authorise a backend replacement.
+
+## SDK version revision authorised by Rachit
+
+Rachit selected **“Use 2.51 and verify compatibility”** after the download filename was found to differ from the original 2.50 pin. The original model-archive provenance in `tools/models.lock.json` remains 2.50.0.260828221209; the downloaded DLC hashes remain unchanged.
+
+At this handoff, `C:/Users/Rachit/Downloads/v2.51.0.260929.zip.crdownload` is incomplete and is not a readable ZIP. Rachit estimates about 50 minutes remaining. No SDK files have been extracted or installed, and 2.51 compatibility has not been claimed.
+
+After completion: verify the archive and actual SDK build identity, read its licence and platform dependencies, compile against its headers, confirm SM8650's SoC identifier in its bundled documentation, and generate the HTP v75 context from the verified DLC using its host tools. Package runtime libraries from the same 2.51 SDK as that context. Update the runtime pin only after those checks establish the actual version and compatibility. Physical NPU execution/performance checks remain deferred.
