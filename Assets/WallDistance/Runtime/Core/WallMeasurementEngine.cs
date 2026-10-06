@@ -20,6 +20,12 @@ namespace WallDistance.Core
         /// <summary>Latest DENSE depth frame for the depth-only fallback, or null. Raw depth is sparse on textureless walls.</summary>
         public DepthFrame denseDepth;
         public bool depthSupported;
+        /// <summary>Wall-map tracks for the left/right readings. Null when no map is in use (assisted mode).</summary>
+        public IReadOnlyList<WallTrack> mapWalls;
+        /// <summary>Gravity up in session space; left at zero it means Vector3.up.</summary>
+        public Vector3 up;
+        /// <summary>Why learned detection is not producing walls (WallDetectionPipeline.DetectionFailure); None when it is.</summary>
+        public FailureReason detectionFailure;
     }
 
     /// <summary>
@@ -35,6 +41,7 @@ namespace WallDistance.Core
         readonly MeasurementFilter _nearestFilter = new MeasurementFilter();
         readonly DepthValidator _validator = new DepthValidator();
         readonly DepthPlaneFitter _fitter = new DepthPlaneFitter();
+        readonly CorridorSideSelector _sides = new CorridorSideSelector();
         string _lastSessionId;
 
         public WallMeasurementEngine(MeasurementConfig cfg)
@@ -47,6 +54,7 @@ namespace WallDistance.Core
         {
             _aimedFilter.Reset();
             _nearestFilter.Reset();
+            _sides.Reset();
             _lastSessionId = null;
         }
 
@@ -64,23 +72,71 @@ namespace WallDistance.Core
                 timestamp = input.now,
                 sessionTracking = input.sessionTracking,
                 depthSupported = input.depthSupported,
+                // NaN, not 0: a zero-width corridor is a value, "no width" is not.
+                corridorWidthMeters = float.NaN,
             };
 
             if (!input.sessionTracking)
             {
                 // Tracking loss invalidates immediately; the filters are cleared so the first
-                // reading after recovery is not blended with pre-loss history.
+                // reading after recovery is not blended with pre-loss history. The wall MAP is
+                // kept (it lives outside the engine), so sides come straight back on recovery.
                 _aimedFilter.Reset();
                 _nearestFilter.Reset();
+                _sides.Reset();
                 snap.aimed = WallReading.Invalid(MeasurementKind.Aimed, FailureReason.TrackingLost, input.sessionId, input.now, input.cameraPose);
                 snap.nearest = WallReading.Invalid(MeasurementKind.NearestObserved, FailureReason.TrackingLost, input.sessionId, input.now, input.cameraPose);
+                snap.left = WallReading.Invalid(MeasurementKind.CorridorLeft, FailureReason.TrackingLost, input.sessionId, input.now, input.cameraPose);
+                snap.right = WallReading.Invalid(MeasurementKind.CorridorRight, FailureReason.TrackingLost, input.sessionId, input.now, input.cameraPose);
                 return snap;
             }
 
             snap.aimed = MeasureAimed(input);
             snap.nearest = MeasureNearest(input);
             if (config.allowDenseDetection) MeasureNearestDepth(input, ref snap.nearest);
+            MeasureSides(input, ref snap);
+
+            Substitute(ref snap.aimed, input.detectionFailure);
+            Substitute(ref snap.nearest, input.detectionFailure);
+            Substitute(ref snap.left, input.detectionFailure);
+            Substitute(ref snap.right, input.detectionFailure);
+            FillSourceChain(ref snap.aimed);
+            FillSourceChain(ref snap.nearest);
             return snap;
+        }
+
+        void MeasureSides(in EngineInput input, ref WallDistanceSnapshot snap)
+        {
+            if (input.mapWalls == null)
+            {
+                _sides.Reset();
+                snap.left = WallReading.Invalid(MeasurementKind.CorridorLeft, FailureReason.NoWallOnSide, input.sessionId, input.now, input.cameraPose);
+                snap.right = WallReading.Invalid(MeasurementKind.CorridorRight, FailureReason.NoWallOnSide, input.sessionId, input.now, input.cameraPose);
+                snap.corridorWidthMeters = float.NaN;
+                return;
+            }
+            Vector3 up = input.up.sqrMagnitude > 0.5f ? input.up.normalized : Vector3.up;
+            _sides.Measure(input.sessionId, input.now, input.cameraPose, input.worldToClip, up, input.mapWalls, config,
+                out snap.left, out snap.right, out snap.corridorWidthMeters);
+        }
+
+        /// <summary>
+        /// A generic "no wall" is replaced by WHY learned detection has none: the user can act on
+        /// "point at the floor", not on "aim at a wall". Valid readings are never touched, and
+        /// InferenceUnavailable is never stamped on readings (deviation D9).
+        /// </summary>
+        static void Substitute(ref WallReading r, FailureReason detection)
+        {
+            if (r.isValid) return;
+            if (detection != FailureReason.NoFloor && detection != FailureReason.AlignmentFailed && detection != FailureReason.InferenceStale) return;
+            if (r.failure != FailureReason.NoWallUnderCrosshair && r.failure != FailureReason.NoWallInView && r.failure != FailureReason.NoWallOnSide) return;
+            r.failure = detection;
+            r.qualityReason = detection.ToString();
+        }
+
+        static void FillSourceChain(ref WallReading r)
+        {
+            if (r.isValid && string.IsNullOrEmpty(r.sourceChain)) r.sourceChain = r.source.ToString();
         }
 
         // ---------------------------------------------------------------- aimed
@@ -300,6 +356,11 @@ namespace WallDistance.Core
                 ApplyRangeLabel(ref r);
                 return;
             }
+            if (c.source == MeasurementSource.LearnedDepth || c.source == MeasurementSource.FloorEdge)
+            {
+                ApplyLearnedQuality(ref r, c, input);
+                return;
+            }
             var v = _validator.Validate(c, input.depth, config, input.now);
             r.depthResidualMeters = v.medianResidualMeters;
             r.depthInlierFraction = v.inlierFraction;
@@ -328,6 +389,38 @@ namespace WallDistance.Core
                 r.qualityReason = v.reason;
             }
 
+            ApplyRangeLabel(ref r);
+        }
+
+        /// <summary>
+        /// Map walls from learned depth. Raw depth can only PROMOTE them (to CrossChecked) when it
+        /// agrees within the cross-check tolerance. Disagreement is noted in the reason, never a
+        /// demotion (deviation D10): on plain walls raw depth is the unreliable party (spec §2).
+        /// </summary>
+        void ApplyLearnedQuality(ref WallReading r, WallCandidate c, in EngineInput input)
+        {
+            var v = _validator.Validate(c, input.depth, config, input.now);
+            r.depthResidualMeters = v.medianResidualMeters;
+            r.depthInlierFraction = v.inlierFraction;
+            bool rawAgrees = v.depthUsed
+                             && Mathf.Abs(v.medianResidualMeters) <= config.crossCheckToleranceMeters
+                             && v.inlierFraction >= config.depthMinInlierFraction;
+            r.source = c.source;
+            r.sourceChain = c.source.ToString() + (c.crossChecked ? "+ARPlane" : "") + (rawAgrees ? "+RawDepth" : "");
+            if (c.crossChecked || rawAgrees)
+            {
+                r.quality = QualityLabel.CrossChecked;
+                r.qualityReason = rawAgrees
+                    ? $"raw depth agrees within {Mathf.Abs(v.medianResidualMeters) * 100f:F0} cm"
+                    : $"ARCore plane agrees within {config.crossCheckToleranceMeters * 100f:F0} cm";
+            }
+            else
+            {
+                r.quality = c.source == MeasurementSource.FloorEdge ? QualityLabel.EdgeConfirmed : QualityLabel.LearnedEstimate;
+                r.qualityReason = v.depthUsed
+                    ? $"raw depth differs by {Mathf.Abs(v.medianResidualMeters) * 100f:F0} cm (not used on plain walls)"
+                    : c.source == MeasurementSource.FloorEdge ? "base snapped to the floor edge" : "learned depth scaled to the floor";
+            }
             ApplyRangeLabel(ref r);
         }
 
