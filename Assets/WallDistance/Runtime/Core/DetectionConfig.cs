@@ -56,6 +56,9 @@ namespace WallDistance.Core
         public int maxPlanes = 4;
         public int planeRansacIterations = 128;
         public float planeInlierMeters = 0.08f;
+        [Tooltip("Numerical refit floor; noisy observations use the larger median-residual band.")]
+        public float planeRefitMinMeters = 0.001f;
+        public float planeRefitResidualMultiplier = 2.5f;
         public int minPlaneInliers = 150;
         public float minHeightSpanMeters = 0.3f;
         public float minLengthMeters = 0.4f;
