@@ -1,0 +1,22 @@
+﻿{
+    "note":  "Pinned model artefacts. Hashes are recorded on the first fetch with -Record and verified on every later fetch. Model weights are git-ignored.",
+    "qairt":  "2.50.0.260828221209",
+    "models":  [
+                   {
+                       "name":  "depth_anything_v2-qnn_dlc-w8a16",
+                       "release":  "qai-hub-models v0.63.0",
+                       "license":  "MIT (Qualcomm AI Hub model card)",
+                       "url":  "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/depth_anything_v2/releases/v0.63.0/depth_anything_v2-qnn_dlc-w8a16.zip",
+                       "zipSha256":  "2eb217a85c7e7aa27a669d1eb2b235add55ad975c9ffb756b6a9fef63f7e0dad",
+                       "dlcSha256":  "7e06031734d9594856a6bbff1ac028ac5a4c708d1edd8ed182cd882b0c8d9917"
+                   },
+                   {
+                       "name":  "depth_anything_v2-qnn_dlc-float",
+                       "release":  "qai-hub-models v0.63.0",
+                       "license":  "MIT (Qualcomm AI Hub model card)",
+                       "url":  "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/depth_anything_v2/releases/v0.63.0/depth_anything_v2-qnn_dlc-float.zip",
+                       "zipSha256":  "3fd4a3041b056a5d113446bbcf0f4b671a121a63833b893e3abf0fc52c5db9f3",
+                       "dlcSha256":  "815a29f6758d7dffd87b010ce7dc829cefaf0537cbb6d994a187c2d020473f72"
+                   }
+               ]
+}

@@ -60,3 +60,8 @@ mono_crash.*
 # OS noise.
 .DS_Store
 Thumbs.db
+
+# Model download cache (tools/fetch-models.ps1) and generated QNN context binaries.
+/tools/.cache/
+/Assets/StreamingAssets/Models/
+/Assets/StreamingAssets/Models.meta
