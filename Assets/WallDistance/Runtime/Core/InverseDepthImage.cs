@@ -35,6 +35,21 @@ namespace WallDistance.Core
         }
 
         public bool InContent(int u, int v) => content.Contains(new Vector2Int(u, v));
+        /// <summary>
+        /// NaN every value outside <see cref="content"/>. The network also "sees" the black letterbox
+        /// bars and returns plausible-looking depth there; NaN makes any consumer that forgets the
+        /// content check skip those pixels instead of fitting walls to them.
+        /// </summary>
+        public void MaskOutsideContent()
+        {
+            for (int v = 0; v < height; v++)
+            {
+                int row = v * width;
+                bool rowInside = v >= content.yMin && v < content.yMax;
+                for (int u = 0; u < width; u++)
+                    if (!rowInside || u < content.xMin || u >= content.xMax) values[row + u] = float.NaN;
+            }
+        }
 
         /// <summary>Camera-space ray with unit Z, so a distance along it IS the Z-depth.</summary>
         public Vector3 CameraRay(float u, float v) =>
