@@ -10,9 +10,16 @@ namespace WallDistance.Core
         Aimed,
         /// <summary>Shortest distance to any eligible wall currently inside the camera's view.</summary>
         NearestObserved,
+        /// <summary>Horizontal perpendicular distance to the corridor wall left of the phone's heading (spec §5.5).</summary>
+        CorridorLeft,
+        /// <summary>Horizontal perpendicular distance to the corridor wall right of the phone's heading.</summary>
+        CorridorRight,
     }
 
-    /// <summary>Where the number came from. Higher entries are more trustworthy.</summary>
+    /// <summary>
+    /// Where the number came from. Values are appended to keep stored integers stable, so the
+    /// order is NOT a trust ranking - each value documents its own trust.
+    /// </summary>
     public enum MeasurementSource
     {
         /// <summary>Nothing usable this frame.</summary>
@@ -28,6 +35,10 @@ namespace WallDistance.Core
         DepthOnly,
         /// <summary>Wall base selected by the user on an AR-tracked floor; not automatic wall recognition.</summary>
         AssistedFloor,
+        /// <summary>Wall plane from floor-aligned monocular network depth only.</summary>
+        LearnedDepth,
+        /// <summary>Learned wall whose base line was snapped to image edges on the tracked floor. Geometric; ranks above LearnedDepth.</summary>
+        FloorEdge,
     }
 
     /// <summary>
@@ -50,6 +61,12 @@ namespace WallDistance.Core
         /// <summary>Depth-only fit under the crosshair (no AR plane). Usable, but un-cross-checked.</summary>
         DepthEstimate,
         AssistedEstimate,
+        /// <summary>Learned-depth wall only; scale comes from the floor fit.</summary>
+        LearnedEstimate,
+        /// <summary>Wall base found as an image edge on the tracked floor.</summary>
+        EdgeConfirmed,
+        /// <summary>Two independent sources (learned vs ARCore plane or raw depth) agree within crossCheckToleranceMeters.</summary>
+        CrossChecked,
     }
 
     /// <summary>Why a reading is invalid. Only meaningful when <see cref="WallReading.isValid"/> is false.</summary>
@@ -66,6 +83,18 @@ namespace WallDistance.Core
         NoWallInView,
         /// <summary>The candidate under the crosshair is no longer tracked or was merged away.</summary>
         CandidateLost,
+        /// <summary>No floor plane and too little confident raw depth to fix the depth scale.</summary>
+        NoFloor,
+        /// <summary>Floor fit rejected: too few floor inliers or residual above 3%.</summary>
+        AlignmentFailed,
+        /// <summary>ML depth backend could not start on this device.</summary>
+        InferenceUnavailable,
+        /// <summary>No detection for over 1 s and the map has no wall for this reading.</summary>
+        InferenceStale,
+        /// <summary>Phone points within 20° of straight up/down, so left/right are undefined.</summary>
+        NoHeading,
+        /// <summary>No map wall qualifies on this side (spec §5.5).</summary>
+        NoWallOnSide,
     }
 
     /// <summary>
@@ -103,6 +132,8 @@ namespace WallDistance.Core
         public float depthInlierFraction;
         /// <summary>Human-readable reason for the quality label, e.g. "depth disagreed by 0.31 m".</summary>
         public string qualityReason;
+        /// <summary>Sources behind the number, e.g. "FloorEdge+ARPlane" (CSV aimed_source_chain). Empty when invalid.</summary>
+        public string sourceChain;
 
         public static WallReading Invalid(MeasurementKind kind, FailureReason reason, string sessionId, double timestamp, Pose cameraPose)
         {
@@ -122,16 +153,23 @@ namespace WallDistance.Core
                 depthResidualMeters = float.NaN,
                 depthInlierFraction = float.NaN,
                 qualityReason = reason.ToString(),
+                sourceChain = "",
             };
         }
     }
 
-    /// <summary>Both readings for one frame plus session context.</summary>
+    /// <summary>All readings for one frame plus session context.</summary>
     [Serializable]
     public struct WallDistanceSnapshot
     {
         public WallReading aimed;
         public WallReading nearest;
+        /// <summary>Corridor wall to the left of the phone's floor heading (from the wall map).</summary>
+        public WallReading left;
+        /// <summary>Corridor wall to the right of the phone's floor heading (from the wall map).</summary>
+        public WallReading right;
+        /// <summary>left + right when both are valid and parallel within 10°; NaN otherwise. Always set by the engine.</summary>
+        public float corridorWidthMeters;
         public bool sessionTracking;
         public bool depthSupported;
         public double timestamp;
@@ -191,5 +229,21 @@ namespace WallDistance.Core
         [Header("Candidate eligibility")]
         [Tooltip("Minimum polygon area (m^2) for a vertical plane to count as a wall candidate.")]
         public float minCandidateAreaSquareMeters = 0.2f;
+        [Header("Corridor sides (spec §5.5)")]
+        [Tooltip("Within this many degrees of straight up/down there is no heading.")]
+        public float sideNoHeadingDeg = 20f;
+        [Tooltip("A wall becomes a side wall when its floor line is within this angle of the heading.")]
+        public float sideEnterAngleDeg = 30f;
+        [Tooltip("A current side wall stops being one above this angle (hysteresis).")]
+        public float sideExitAngleDeg = 40f;
+        public float sideExtentMarginMeters = 1.0f;
+        public float sideMaxAgeSeconds = 10f;
+        public float sideMaxDistanceMeters = 6f;
+        public float corridorParallelToleranceDeg = 10f;
+
+        [Header("Learned detection")]
+        [Tooltip("Two sources agreeing within this distance earn CrossChecked.")]
+        public float crossCheckToleranceMeters = 0.05f;
+        public DetectionConfig detection = new DetectionConfig();
     }
 }

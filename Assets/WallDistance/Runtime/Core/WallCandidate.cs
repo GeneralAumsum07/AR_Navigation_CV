@@ -16,6 +16,11 @@ namespace WallDistance.Core
         public string id;
         /// <summary>Distinguishes user-selected floor geometry from automatically detected walls.</summary>
         public MeasurementSource source = MeasurementSource.PlaneOnly;
+        /// <summary>
+        /// Map walls only: a learned observation and an independent ARCore plane recently agreed
+        /// within MeasurementConfig.crossCheckToleranceMeters. Always false for raw AR planes.
+        /// </summary>
+        public bool crossChecked;
 
         /// <summary>True only while the provider reports the plane as actively tracked.</summary>
         public bool isTracked;
