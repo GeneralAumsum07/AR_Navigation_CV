@@ -18,9 +18,11 @@ import sys
 
 
 def _open_text(path):
+    # Unity's StreamWriter emits a UTF-8 BOM. Consume it before checking '#' so the
+    # first metadata line never becomes the CSV header; plain UTF-8 also remains valid.
     if path.endswith(".gz"):
-        return gzip.open(path, "rt", encoding="utf-8", newline="")
-    return open(path, encoding="utf-8", newline="")
+        return gzip.open(path, "rt", encoding="utf-8-sig", newline="")
+    return open(path, encoding="utf-8-sig", newline="")
 
 
 def read_log(path):

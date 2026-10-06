@@ -70,6 +70,20 @@ class HelperTests(unittest.TestCase):
                 self.assertEqual(len(rows), 30)
                 self.assertEqual(rows[0]["fps"], "30")
 
+    def test_read_log_accepts_the_unity_recorders_utf8_bom(self):
+        # StreamWriter(Encoding.UTF8) prefixes Unity recordings with a BOM. It must not
+        # turn the first comment into the CSV column row, including after gzip compression.
+        with tempfile.TemporaryDirectory() as d:
+            for gz in (False, True):
+                path = os.path.join(d, "unity.csv" + (".gz" if gz else ""))
+                opener = gzip.open if gz else open
+                with opener(path, "wt", encoding="utf-8-sig", newline="") as f:
+                    f.write("# measurement revision=floor-aligned-v1\n")
+                    f.write("t,infer_ms\n0,22\n")
+                header, rows = sb.read_log(path)
+                self.assertEqual(header, ["# measurement revision=floor-aligned-v1"])
+                self.assertEqual(rows, [{"t": "0", "infer_ms": "22"}])
+
 
 class SummaryTests(unittest.TestCase):
     def test_healthy_run_passes_every_check(self):
