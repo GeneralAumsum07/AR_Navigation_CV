@@ -40,6 +40,8 @@ namespace WallDistance.AR
         public Camera arCamera;
         public ARWallCandidateSource candidateSource;
         public ARDepthFrameSource depthSource;
+        public FloorPlaneSource floorSource;
+        public DepthInferenceScheduler scheduler;
 
         [Header("Measurement")]
         public MeasurementConfig config = new MeasurementConfig();
@@ -78,6 +80,14 @@ namespace WallDistance.AR
             NewSessionId();
             Assisted = GetComponent<AssistedWallController>();
             if (Assisted == null) Assisted = gameObject.AddComponent<AssistedWallController>();
+            // Learned-depth capture lives on the same XR Origin; created here so the scene needs no edits.
+            if (floorSource == null) floorSource = GetComponent<FloorPlaneSource>();
+            if (floorSource == null) floorSource = gameObject.AddComponent<FloorPlaneSource>();
+            if (scheduler == null) scheduler = GetComponent<DepthInferenceScheduler>();
+            if (scheduler == null) scheduler = gameObject.AddComponent<DepthInferenceScheduler>();
+            scheduler.floorSource = floorSource;
+            // Replaced by the QNN backend in Task 19; until then capture/dumps work without inference.
+            if (scheduler.Backend == null) scheduler.Backend = new NullDepthInference("ML backend not built yet");
         }
 
         void OnEnable()
@@ -126,6 +136,7 @@ namespace WallDistance.AR
 
             candidateSource.Refresh();
             Assisted.Refresh();
+            floorSource.Refresh();
 
             double now = Time.realtimeSinceStartupAsDouble;
             var input = new EngineInput

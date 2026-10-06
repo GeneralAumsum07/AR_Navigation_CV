@@ -17,7 +17,7 @@ namespace WallDistance.AR
         Text _aimedText, _nearestText, _stateText, _statsText, _recordText;
         Image _crosshair;
         Button _recordButton;
-        Text _instruction, _modeText, _captureText;
+        Text _instruction, _modeText, _captureText, _dumpText;
         Button _captureButton;
         WallCompass _compass;
 
@@ -73,6 +73,8 @@ namespace WallDistance.AR
                               $"{service.candidateSource?.TrackedVerticalPlaneCount ?? 0}/{service.candidateSource?.TotalPlaneCount ?? 0} walls/planes · max {service.candidateSource?.LargestVerticalAreaSqM ?? 0f:F2} m²";
             if (recorder != null)
                 _recordText.text = recorder.IsRecording ? $"■ Stop ({recorder.RowsWritten} rows)" : "● Record CSV";
+            if (_dumpText != null && service.scheduler != null)
+                _dumpText.text = service.scheduler.DumpRemaining > 0 ? $"Dumping… {service.scheduler.DumpRemaining} left" : "Dump frames (20)";
         }
 
         static void Render(Text t, string label, WallReading r)
@@ -186,6 +188,15 @@ namespace WallDistance.AR
             _recordButton.onClick.AddListener(() => recorder?.Toggle());
             _recordText = MakeText(btnGo.transform, "Label", font, 40, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(520, 110));
             _recordText.text = "● Record CSV";
+
+            // Phase 1 data capture (spec §7 debug toggle). Development builds only, so field
+            // users never fill their storage with dumps.
+            if (Debug.isDebugBuild)
+            {
+                MakeButton(canvasGo.transform, font, "Dump", new Vector2(0, 1160), new Vector2(600, 100),
+                    () => { if (service.scheduler != null) service.scheduler.RequestDump(20); }, out _dumpText);
+                _dumpText.text = "Dump frames (20)";
+            }
 
             // An EventSystem is required for the button; create one only if the scene lacks it.
             if (FindAnyObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
