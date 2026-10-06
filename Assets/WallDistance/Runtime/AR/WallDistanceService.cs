@@ -42,6 +42,9 @@ namespace WallDistance.AR
         public ARDepthFrameSource depthSource;
         public FloorPlaneSource floorSource;
         public DepthInferenceScheduler scheduler;
+        [Header("Learned depth")]
+        [Tooltip("Context binary in StreamingAssets/Models (Task 7 decides w8a16 or float).")]
+        public string modelFileName = QnnDepthInference.DefaultModelFileName;
 
         [Header("Measurement")]
         public MeasurementConfig config = new MeasurementConfig();
@@ -54,6 +57,15 @@ namespace WallDistance.AR
         public string StateDetail { get; private set; } = "";
         public string SessionId { get; private set; }
         public AssistedWallController Assisted { get; private set; }
+        /// <summary>Learned wall detection and the wall map (left/right come from here).</summary>
+        public WallDetectionPipeline Pipeline { get; private set; }
+        public bool InferenceAvailable => scheduler != null && scheduler.Backend != null && scheduler.Backend.IsAvailable;
+        public string InferenceStatus => scheduler != null && scheduler.Backend != null ? scheduler.Backend.Status : "no scheduler";
+
+        WallMapAnchoring _anchoring;
+        readonly List<MetricSample> _metric = new List<MetricSample>(4096);
+        // Raw depth is ~160x90; every 2nd pixel gives up to ~3600 samples, well above the 200 minimum.
+        const int MetricStride = 2;
 
         /// <summary>Raised after every measurement update with the fresh snapshot.</summary>
         public event Action<WallDistanceSnapshot> Updated;
@@ -76,6 +88,10 @@ namespace WallDistance.AR
                 if (cm != null) arCamera = cm.GetComponent<Camera>();
             }
             Engine = new WallMeasurementEngine(config);
+            Pipeline = new WallDetectionPipeline(config);
+            // Anchors need an anchor manager on the XR Origin; the scene does not have one.
+            if (GetComponent<ARAnchorManager>() == null) gameObject.AddComponent<ARAnchorManager>();
+            _anchoring = new WallMapAnchoring(transform);
             config.allowDenseDetection = true;
             NewSessionId();
             Assisted = GetComponent<AssistedWallController>();
@@ -86,18 +102,21 @@ namespace WallDistance.AR
             if (scheduler == null) scheduler = GetComponent<DepthInferenceScheduler>();
             if (scheduler == null) scheduler = gameObject.AddComponent<DepthInferenceScheduler>();
             scheduler.floorSource = floorSource;
-            // Replaced by the QNN backend in Task 19; until then capture/dumps work without inference.
-            if (scheduler.Backend == null) scheduler.Backend = new NullDepthInference("ML backend not built yet");
+            // Real backend; until its async setup finishes it reports unavailable and the ARCore path runs.
+            scheduler.Backend?.Dispose();
+            scheduler.Backend = QnnDepthInference.Create(this, modelFileName);
         }
 
         void OnEnable()
         {
             ARSession.stateChanged += OnArStateChanged;
+            if (scheduler != null) scheduler.FrameReady += OnInferenceFrame;
         }
 
         void OnDisable()
         {
             ARSession.stateChanged -= OnArStateChanged;
+            if (scheduler != null) scheduler.FrameReady -= OnInferenceFrame;
         }
 
         void OnArStateChanged(ARSessionStateChangedEventArgs args)
@@ -115,7 +134,27 @@ namespace WallDistance.AR
         {
             NewSessionId();
             Engine.Reset();
+            Pipeline.Reset();
+            _anchoring.Clear();
             if (depthSource != null) depthSource.ResetFrames();
+        }
+
+        /// <summary>
+        /// One finished inference: align it to the floor (or to raw depth when there is no floor
+        /// yet) and fold its walls into the map. Runs on the main thread from the scheduler's
+        /// Update, so the map is never touched concurrently.
+        /// </summary>
+        void OnInferenceFrame(InverseDepthImage img)
+        {
+            if (State != WallDistanceSessionState.Tracking || Assisted.Active) return;
+            double now = Time.realtimeSinceStartupAsDouble;
+            FloorPlane floor = floorSource != null && floorSource.HasFloor ? floorSource.CurrentPlane : default;
+            _metric.Clear();
+            // Raw-depth samples are only the no-floor fallback (spec §6), so skip the work otherwise.
+            if (!floor.IsValid && depthSource != null)
+                MetricSampleCollector.Collect(depthSource.Latest, img, config.detection.metricMinConfidence, now,
+                    config.depthMaxAgeSeconds, MetricStride, _metric);
+            Pipeline.ProcessFrame(SessionId, img, floor, _metric, now);
         }
 
         void NewSessionId()
@@ -139,19 +178,43 @@ namespace WallDistance.AR
             floorSource.Refresh();
 
             double now = Time.realtimeSinceStartupAsDouble;
+            bool tracking = State == WallDistanceSessionState.Tracking;
+            bool automatic = !Assisted.Active;
+            Vector3 up = floorSource != null && floorSource.HasFloor ? floorSource.CurrentPlane.up : Vector3.up;
+
+            // A session change empties the map before anything reads it, not at the next inference.
+            Pipeline.Map.SetSession(SessionId);
+            if (tracking && automatic)
+            {
+                Pipeline.ObserveArPlanes(SessionId, candidateSource.Candidates, up, now);
+                Pipeline.Map.Prune(now);
+                _anchoring.Sync(Pipeline.Map);
+            }
+
+            // Automatic mode measures against the map (learned walls plus ARCore planes folded in at
+            // 10 Hz). Before the map has anything, ARCore's own candidates keep the old behaviour.
+            IReadOnlyList<WallCandidate> candidates;
+            if (!automatic) candidates = Assisted.Candidates;
+            else if (Pipeline.Map.Tracks.Count > 0) candidates = Pipeline.Map.Candidates(now);
+            else candidates = candidateSource.Candidates;
+
             var input = new EngineInput
             {
                 sessionId = SessionId,
-                sessionTracking = State == WallDistanceSessionState.Tracking,
+                sessionTracking = tracking,
                 now = now,
                 cameraPose = new Pose(arCamera.transform.position, arCamera.transform.rotation),
                 worldToClip = arCamera.projectionMatrix * arCamera.worldToCameraMatrix,
                 crosshairRay = arCamera.ViewportPointToRay(new Vector3(crosshairViewport.x, crosshairViewport.y, 0f)),
-                candidates = Assisted.Active ? Assisted.Candidates : candidateSource.Candidates,
+                candidates = candidates,
                 // Assisted mode waits for user selection; do not secretly fall back to depth.
-                depth = !Assisted.Active && depthSource != null ? depthSource.Latest : null,
-                denseDepth = !Assisted.Active && depthSource != null ? depthSource.LatestDense : null,
+                depth = automatic && depthSource != null ? depthSource.Latest : null,
+                denseDepth = automatic && depthSource != null ? depthSource.LatestDense : null,
                 depthSupported = depthSource != null && depthSource.DepthSupported,
+                // Assisted mode has no map: sides are NoWallOnSide there, and no ML reasons apply.
+                mapWalls = automatic ? Pipeline.Map.Tracks : null,
+                up = up,
+                detectionFailure = automatic ? Pipeline.DetectionFailure(now, InferenceAvailable) : FailureReason.None,
             };
 
             Latest = Engine.Update(input);
