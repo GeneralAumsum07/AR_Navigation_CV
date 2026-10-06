@@ -34,6 +34,10 @@ namespace WallDistance.Core
         [Tooltip("A floor pixel is an inlier when its aligned depth is within this fraction of the floor-plane depth. " +
                  "Deliberately wider than maxAlignResidual so the median residual check below is meaningful.")]
         public float alignInlierRelative = 0.06f;
+        [Tooltip("Refit band is this multiple of the median residual, capped by alignInlierRelative.")]
+        public float alignRefitResidualMultiplier = 3f;
+        [Tooltip("Numerical floor for the adaptive refit band; keeps exact floor pixels despite float roundoff.")]
+        public float alignRefitMinRelative = 0.0001f;
         [Tooltip("Fewer floor inliers than this discards the frame (spec §6).")]
         public int minFloorInliers = 500;
         [Tooltip("Median relative residual of the inliers above this discards the frame (spec §6: 3%).")]
