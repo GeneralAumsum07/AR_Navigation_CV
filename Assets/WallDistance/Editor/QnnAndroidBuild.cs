@@ -23,7 +23,9 @@ namespace WallDistance.EditorTools
     {
         const string LibDir = "Assets/Plugins/Android/libs/arm64-v8a";
         const string ModelDir = "Assets/StreamingAssets/Models";
-        const string Marker = "// walldepth: extract native libraries";
+        // A versioned marker also upgrades an existing incremental Gradle project that
+        // still contains the original extraction-only block.
+        const string Marker = "// walldepth: QNN runtime packaging v2";
         static readonly string[] RequiredLibs =
             { "libwalldepth.so", "libQnnHtp.so", "libQnnHtpV75Stub.so", "libQnnHtpV75Skel.so", "libQnnSystem.so" };
 
@@ -48,6 +50,8 @@ namespace WallDistance.EditorTools
 
         public void OnPostGenerateGradleAndroidProject(string unityLibraryPath)
         {
+            string manifest = Path.Combine(unityLibraryPath, "src", "main", "AndroidManifest.xml");
+            File.WriteAllText(manifest, QnnAndroidManifest.Patch(File.ReadAllText(manifest)));
             // Packaging options belong to the application module ("launcher"), next to unityLibrary.
             string launcher = Path.GetFullPath(Path.Combine(unityLibraryPath, "..", "launcher"));
             string gradle = Path.Combine(launcher, "build.gradle");
@@ -56,7 +60,12 @@ namespace WallDistance.EditorTools
             if (File.ReadAllText(gradle).Contains(Marker)) return;
             // The same block is valid Groovy and Kotlin DSL; Gradle merges repeated android {} blocks.
             File.AppendAllText(gradle,
-                "\n" + Marker + "\nandroid {\n    packaging {\n        jniLibs {\n            useLegacyPackaging = true\n        }\n    }\n}\n");
+                "\n" + Marker + "\nandroid {\n    packaging {\n        jniLibs {\n            useLegacyPackaging = true\n"
+                // Preserve the pinned native bytes. In particular, the Hexagon skeleton is
+                // DSP code and must not be rewritten by Android's ARM64 stripping stage.
+                + "            keepDebugSymbols.add(\"**/libQnn*.so\")\n"
+                + "            keepDebugSymbols.add(\"**/libwalldepth.so\")\n"
+                + "        }\n    }\n}\n");
         }
     }
 }

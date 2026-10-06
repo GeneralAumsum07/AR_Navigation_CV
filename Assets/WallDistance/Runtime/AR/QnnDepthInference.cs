@@ -147,12 +147,6 @@ namespace WallDistance.AR
             if (rc == 0) return false;
             _busy = false;
             _pending = null;
-            if (_modelRequest != null)
-            {
-                _modelRequest.Abort();
-                _modelRequest.Dispose();
-                _modelRequest = null;
-            }
             if (rc < 0) { Fail("inference"); return false; }
             target.inferenceMilliseconds = ms;
             target.MaskOutsideContent();
@@ -176,6 +170,14 @@ namespace WallDistance.AR
             _available = false;
             _busy = false;
             _pending = null;
+            // Unity may permanently stop Setup while the APK model is being copied. That
+            // coroutine's using/finally then cannot own cleanup; the backend owns the request.
+            if (_modelRequest != null)
+            {
+                _modelRequest.Abort();
+                _modelRequest.Dispose();
+                _modelRequest = null;
+            }
             Shutdown();
         }
 
