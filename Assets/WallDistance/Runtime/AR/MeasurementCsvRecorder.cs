@@ -73,7 +73,9 @@ namespace WallDistance.AR
         void WriteHeader()
         {
             var c = service.config;
-            _writer.WriteLine("# WallDistance benchmark log; measurement revision=sensor-pose-assisted-v3");
+            _writer.WriteLine("# WallDistance benchmark log; measurement revision=" + CsvSchema.Revision);
+            // Spec §6: an unavailable ML backend is noted once here, not stamped on every reading.
+            _writer.WriteLine("# inference=" + service.InferenceStatus.Replace('\n', ' '));
             _writer.WriteLine($"# device={SystemInfo.deviceModel} os={SystemInfo.operatingSystem} unity={Application.unityVersion}");
             _writer.WriteLine($"# condition={conditionTag}");
             _writer.WriteLine("# config: " + JsonUtility.ToJson(c));
@@ -86,7 +88,8 @@ namespace WallDistance.AR
                 "cam_x", "cam_y", "cam_z", "cam_qx", "cam_qy", "cam_qz", "cam_qw",
                 "aimed_pt_x", "aimed_pt_y", "aimed_pt_z", "aimed_n_x", "aimed_n_y", "aimed_n_z",
                 "rawProviderTimestampS", "denseProviderTimestampS", "denseAgeS",
-                "confidenceInfo", "sensorPoseInfo", "cameraTimestampS", "confidenceTimestampS", "mode", "depthError"));
+                "confidenceInfo", "sensorPoseInfo", "cameraTimestampS", "confidenceTimestampS", "mode", "depthError")
+                + "," + string.Join(",", CsvSchema.AppendedColumns()));
         }
 
         void OnUpdated(WallDistanceSnapshot s)
@@ -133,7 +136,29 @@ namespace WallDistance.AR
             Append(service.depthSource != null ? service.depthSource.CameraTimestamp : double.NaN);
             Append(service.depthSource != null ? service.depthSource.ConfidenceTimestamp : double.NaN);
             Append(service.Assisted.Active ? "AssistedFloor" : "Automatic");
-            Append(Quote(service.depthSource != null ? service.depthSource.LastError : ""), last:true);
+            Append(Quote(service.depthSource != null ? service.depthSource.LastError : ""));
+
+            // --- learned detection (CsvSchema.LearnedColumns, same order) ---
+            var sch = service.scheduler;
+            var pipe = service.Pipeline;
+            var al = pipe.LastAlignment;
+            Append(sch != null ? sch.LastInferenceMs : double.NaN);
+            Append(sch != null ? sch.CollectedHz : float.NaN);
+            Append(al != null && al.success ? al.s : float.NaN);
+            Append(al != null && al.success ? al.t : float.NaN);
+            Append(al != null ? al.residual : float.NaN);
+            Append(al != null ? al.inliers : -1);
+            Append(pipe.Map.Tracks.Count);
+            Append(Quote(s.aimed.sourceChain));
+            Append(pipe.LastEdgeSnapFraction);
+            Append(service.floorSource != null && service.floorSource.HasFloor
+                ? service.floorSource.CurrentPlane.HeightAbove(s.aimed.cameraPose.position) : float.NaN);
+            Append(ThermalStatus.Current);
+            Append(pipe.LastDetectLatencyMs);
+
+            AppendReading(s.left, true);
+            AppendReading(s.right, true);
+            Append(s.corridorWidthMeters, last: true);
 
             _writer.WriteLine(_sb.ToString());
             RowsWritten++;

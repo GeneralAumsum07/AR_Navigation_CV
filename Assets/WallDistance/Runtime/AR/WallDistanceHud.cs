@@ -14,7 +14,7 @@ namespace WallDistance.AR
         public WallDistanceService service;
         public MeasurementCsvRecorder recorder;
 
-        Text _aimedText, _nearestText, _stateText, _statsText, _recordText;
+        Text _aimedText, _nearestText, _stateText, _statsText, _recordText, _sidesText;
         Image _crosshair;
         Button _recordButton;
         Text _instruction, _modeText, _captureText, _dumpText;
@@ -56,10 +56,15 @@ namespace WallDistance.AR
                 _nearestText.text = "Nearest observed wall: —";
                 _aimedText.color = _nearestText.color = ColorMuted;
                 _crosshair.color = ColorMuted;
+                _sidesText.text = "L — | R — | W —";
+                _sidesText.color = ColorMuted;
             }
             else
             {
-                _stateText.text = s.depthSupported ? "" : "Depth API unavailable on this device: plane estimates only";
+                // Learned depth state: shown while loading or failed, so "planes only" is never silent.
+                string ml = service.InferenceAvailable ? "" : "ML depth: " + service.InferenceStatus + " (ARCore planes only)";
+                string depthMsg = s.depthSupported ? "" : "Depth API unavailable on this device: plane estimates only";
+                _stateText.text = ml.Length > 0 && depthMsg.Length > 0 ? ml + "\n" + depthMsg : ml + depthMsg;
                 _stateText.color = ColorEstimate;
                 Render(_aimedText, "Aimed wall", s.aimed);
                 Render(_nearestText, "Nearest observed wall", s.nearest);
@@ -67,10 +72,17 @@ namespace WallDistance.AR
                 if (s.nearest.isValid) _nearestText.text += "\n"+_compass.Describe(s.nearest);
                 if (!service.Assisted.Active) _instruction.text="Scan slowly. Green: aimed wall · Cyan: closest detected\nDistances and closest ranking are approximate";
                 _crosshair.color = s.aimed.isValid ? QualityColor(s.aimed.quality) : ColorMuted;
+                _sidesText.text = ReadingText.Sides(s.left, s.right, s.corridorWidthMeters);
+                string hint = ReadingText.SidesHint(s.left, s.right);
+                if (hint.Length > 0) _sidesText.text += "  (" + hint + ")";
+                _sidesText.color = s.left.isValid && s.right.isValid ? Color.white : ColorMuted;
             }
 
+            var sch = service.scheduler;
             _statsText.text = $"{(1f / Mathf.Max(Time.unscaledDeltaTime, 1e-4f)):F0} fps · {service.UpdateRate:F0} upd/s · " +
-                              $"{service.candidateSource?.TrackedVerticalPlaneCount ?? 0}/{service.candidateSource?.TotalPlaneCount ?? 0} walls/planes · max {service.candidateSource?.LargestVerticalAreaSqM ?? 0f:F2} m²";
+                              $"ML {(sch != null ? sch.CollectedHz : 0f):F0} Hz {(sch != null ? sch.LastInferenceMs : double.NaN):F0} ms · " +
+                              $"{service.Pipeline.Map.Tracks.Count} walls · " +
+                              $"{service.candidateSource?.TrackedVerticalPlaneCount ?? 0}/{service.candidateSource?.TotalPlaneCount ?? 0} planes";
             if (recorder != null)
                 _recordText.text = recorder.IsRecording ? $"■ Stop ({recorder.RowsWritten} rows)" : "● Record CSV";
             if (_dumpText != null && service.scheduler != null)
@@ -138,6 +150,8 @@ namespace WallDistance.AR
             _nearestText.rectTransform.anchoredPosition = new Vector2(0,610);
             _nearestText.fontSize = 36;
             _statsText.rectTransform.anchoredPosition = new Vector2(0,530);
+            // Between the stats line (530) and the mode buttons (360): spec §5.5's single line.
+            _sidesText = MakeText(canvasGo.transform, "Sides", font, 34, new Vector2(0.5f, 0f), new Vector2(0, 460), new Vector2(1000, 60));
             MakeButton(canvasGo.transform,font,"Mode",new Vector2(-250,360),new Vector2(470,100),
                 () => service.Assisted.ToggleMode(),out _modeText);
             MakeButton(canvasGo.transform,font,"Reselect",new Vector2(250,360),new Vector2(470,100),
