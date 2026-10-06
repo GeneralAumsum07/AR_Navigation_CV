@@ -43,6 +43,7 @@ The input's real value range is [0, 1]. QNN scale-offset encoding uses the negat
 
 - Python 3.13.11 and NumPy 2.4.6 are available.
 - All three Python scripts compile and both analysis/input CLIs expose their documented options.
+- The context-generator contract test invokes a fake SDK generator and confirms its arguments without changing persistent environment variables. The native offline tests cover converter math and self-test rejection of NaN output. These stubs do not produce deployable models or verify the pinned SDK headers.
 - Physical frame orientation, image/pose timestamp matching, latency and model-output parameterisation remain unverified.
 
 ## Packaging
@@ -50,3 +51,13 @@ The input's real value range is [0, 1]. QNN scale-offset encoding uses the negat
 - QNN header compatibility, native library LOAD alignment, DSP skeleton extraction and self-test against qnn-net-run: TBD — build with the pinned SDK and then run the deferred device checks.
 - Task 17 conversion checks: missing `tensor_convert.h` produced the expected RED compiler failure. The completed conversion unit test passes on Windows with MinGW GCC (`__fp16` mapped to its IEEE binary16 `_Float16` storage type for this host-only run) and cross-compiles with Unity's Android ARM64/API-25 Clang. This verifies conversion math and target compilation, not QNN execution.
 - `native/walldepth/build-android.ps1` was attempted and refuses with `QNN_SDK_ROOT is not set (Task 7, Step 1)`. The QNN C++ implementation therefore remains unverified against the pinned SDK headers; the plan itself identifies those recalled SDK symbol names as version-dependent.
+
+## Fallback decision (spec §4)
+
+- First verified day QNN packaging blocked progress: 2026-10-06 — pinned SDK absent; anonymous SDK download returned HTTP 403. TBD — was packaging blocked on an earlier working day?
+- Working days blocked so far: one verified day. TBD — what is the actual first blocked working day? The three-day threshold has not been established.
+- Blockers still open: authenticated pinned SDK access, redistribution licence clause, context generation, native header compilation, DSP skeleton loading and device verification.
+- Unblocking actions taken: verified the SDK is absent, attempted the official anonymous download, fetched and verified both pinned model archives, implemented packaging guards and offline contract/conversion tests. TBD — has Rachit signed in to Qualcomm Software Center and obtained the pinned SDK?
+- Decision (Rachit): TBD — stay on QNN or switch to LiteRT if packaging remains blocked for three working days? No backend switch has been made.
+
+Task 23 is a decision gate, with no implementation to run. Rachit's physical-test waiver permits the remaining code tasks; it does not establish NPU performance or authorise a backend replacement.
