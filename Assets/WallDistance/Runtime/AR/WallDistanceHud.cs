@@ -81,7 +81,7 @@ namespace WallDistance.AR
         {
             if (!r.isValid)
             {
-                t.text = $"{label}: — ({Describe(r.failure)})";
+                t.text = $"{label}: — ({ReadingText.Failure(r.failure)})";
                 // A failed depth fit should tell the tester why there is no number.
                 // Otherwise absent raw support looks indistinguishable from a UI failure.
                 if (r.kind == MeasurementKind.Aimed && !string.IsNullOrEmpty(r.qualityReason)
@@ -90,7 +90,7 @@ namespace WallDistance.AR
                 t.color = ColorMuted;
                 return;
             }
-            t.text = $"{label}: {r.distanceMeters:F2} m  [{Describe(r.quality)}]";
+            t.text = $"{label}: {r.distanceMeters:F2} m  [{ReadingText.Quality(r.quality)}]";
             t.color = QualityColor(r.quality);
         }
 
@@ -98,38 +98,16 @@ namespace WallDistance.AR
         {
             switch (q)
             {
+                // Green only where a second, independent check passed or the edge was confirmed.
                 case QualityLabel.DepthValidated: return ColorGood;
+                case QualityLabel.CrossChecked: return ColorGood;
+                case QualityLabel.EdgeConfirmed: return ColorGood;
+                case QualityLabel.LearnedEstimate: return ColorEstimate;
                 case QualityLabel.PlaneEstimate: return ColorEstimate;
                 case QualityLabel.DepthEstimate: return ColorEstimate;
                 case QualityLabel.AssistedEstimate: return new Color(0.3f,0.85f,1f);
                 case QualityLabel.OutOfTestedRange: return ColorEstimate;
                 default: return ColorBad;
-            }
-        }
-
-        static string Describe(QualityLabel q)
-        {
-            switch (q)
-            {
-                case QualityLabel.DepthValidated: return "Depth validated";
-                case QualityLabel.PlaneEstimate: return "Plane estimate";
-                case QualityLabel.DepthEstimate: return "Depth estimate (no plane)";
-                case QualityLabel.AssistedEstimate: return "Assisted floor geometry";
-                case QualityLabel.Unreliable: return "Unreliable";
-                case QualityLabel.OutOfTestedRange: return "Out of tested range";
-                default: return "Unavailable";
-            }
-        }
-
-        static string Describe(FailureReason f)
-        {
-            switch (f)
-            {
-                case FailureReason.NoWallUnderCrosshair: return "aim at a wall";
-                case FailureReason.NoWallInView: return "scan slowly";
-                case FailureReason.TrackingLost: return "tracking lost";
-                case FailureReason.CandidateLost: return "wall lost";
-                default: return "not ready";
             }
         }
 
