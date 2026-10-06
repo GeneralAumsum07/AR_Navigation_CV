@@ -1,6 +1,8 @@
 ﻿{
     "note":  "Pinned model artefacts. Hashes are recorded on the first fetch with -Record and verified on every later fetch. Model weights are git-ignored.",
-    "qairt":  "2.50.0.260828221209",
+    "qairt":  "2.51.0.260929181845",
+    "modelSourceQairt": "2.50.0.260828221209",
+    "sdkArchiveSha256": "9b4ca798902f02a2543857f5de4d233830c044d19701b92fc66a12fdc292211f",
     "models":  [
                    {
                        "name":  "depth_anything_v2-qnn_dlc-w8a16",

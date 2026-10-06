@@ -6,6 +6,7 @@
 int main(int argc, char** argv)
 {
     std::ofstream log(std::getenv("WD_GENERATOR_ARGS"));
+    log << "PATH=" << std::getenv("PATH") << '\n';
     std::string out, name;
     for (int i = 1; i < argc; ++i) {
         log << argv[i] << '\n';

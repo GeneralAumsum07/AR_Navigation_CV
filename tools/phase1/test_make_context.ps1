@@ -22,12 +22,29 @@ Set-Content -LiteralPath (Join-Path $variant 'stub.dlc') -Value 'test fixture, n
 $oldSdk = $env:QNN_SDK_ROOT
 $oldArgs = $env:WD_GENERATOR_ARGS
 $userSdk = [Environment]::GetEnvironmentVariable('QNN_SDK_ROOT', 'User')
+$pin = (Get-Content (Join-Path $repo 'tools\models.lock.json') -Raw | ConvertFrom-Json).qairt
+$pinParts = $pin.Split('.')
+$sdkYaml = Join-Path $cache 'sdk\sdk.yaml'
 try {
     $env:QNN_SDK_ROOT = Join-Path $cache 'sdk'
     $env:WD_GENERATOR_ARGS = Join-Path $cache 'args.txt'
+    # A context created by another SDK must not enter the pinned runtime package.
+    Set-Content $sdkYaml -Value "version: 0.0.0`nbuild_id: 0"
+    # Windows PowerShell 5 wraps native stderr as errors even when redirected. This
+    # invocation is deliberately rejected; judge its exit code, then restore fail-fast.
+    $negativePreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & powershell -ExecutionPolicy Bypass -File $script -Variant phase1-test-model -OutName wrong_sdk > (Join-Path $cache 'wrong-sdk.txt') 2>&1
+        $wrongExit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $negativePreference }
+    if ($wrongExit -eq 0) { throw 'Generator accepted an SDK that differs from the runtime pin' }
+    Set-Content $sdkYaml -Value ("version: " + ($pinParts[0..2] -join '.') + "`nbuild_id: " + $pinParts[3])
     & powershell -ExecutionPolicy Bypass -File $script -Variant phase1-test-model -OutName regression_stub
     if ($LASTEXITCODE -ne 0) { throw 'Stub generator invocation failed' }
     $actual = Get-Content $env:WD_GENERATOR_ARGS
+    $lib = Join-Path $env:QNN_SDK_ROOT 'lib\x86_64-windows-msvc'
+    if ($actual[0] -notlike "PATH=$bin;$lib;*") { throw 'SDK host DLL directories were not placed on the process PATH' }
     foreach ($flag in '--backend', '--model', '--dlc_path', '--binary_file', '--output_dir', '--config_file') {
         if ($flag -notin $actual) { throw "Missing generator flag $flag" }
     }

@@ -6,6 +6,13 @@ project(walldepth CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# CMake may shorten Unity's Windows NDK path to CLANG_~1.EXE. Clang chooses its
+# C++ linker driver from argv[0], so that spelling loses clang++'s implicit libc++
+# linkage even though .cpp compilation succeeds. Select the driver explicitly.
+if(ANDROID AND CMAKE_HOST_WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  add_link_options("--driver-mode=g++")
+endif()
+
 if(NOT QNN_SDK_ROOT)
   message(FATAL_ERROR "Pass -DQNN_SDK_ROOT=<QAIRT SDK root> (see Task 7, Step 1)")
 endif()

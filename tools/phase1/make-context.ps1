@@ -4,7 +4,7 @@
 .NOTES
   Flag names follow QAIRT's qnn-context-binary-generator. Run it with --help first and fix
   any flag that differs in this SDK build before trusting the output.
-  soc_model 57 = SM8650 is from QAIRT's supported-SoC table (inferred; confirm in the SDK docs).
+  soc_model 57 = SM8650, confirmed in QAIRT 2.51's bundled QNN overview table.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Variant,      # e.g. depth_anything_v2-qnn_dlc-w8a16
@@ -15,6 +15,8 @@ $ErrorActionPreference = 'Stop'
 $sdk = $env:QNN_SDK_ROOT
 if (-not $sdk) { throw 'QNN_SDK_ROOT is not set' }
 $repo = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSCommandPath))
+. (Join-Path $repo 'tools\qairt-sdk.ps1')
+$sdkVersion = Assert-QairtSdkVersion $sdk $repo
 $dlc = @(Get-ChildItem -Path (Join-Path $repo "tools\.cache\$Variant") -Recurse -Filter '*.dlc')[0].FullName
 $bin = Join-Path $sdk 'bin\x86_64-windows-msvc'
 $lib = Join-Path $sdk 'lib\x86_64-windows-msvc'
@@ -37,12 +39,18 @@ $htpCfgFwd = $htpCfg -replace '\\', '/'
 }
 "@ | Set-Content -Path $extCfg -Encoding ASCII
 
-& (Join-Path $bin 'qnn-context-binary-generator.exe') `
-    --backend (Join-Path $lib 'QnnHtp.dll') `
-    --model (Join-Path $lib 'QnnModelDlc.dll') `
-    --dlc_path $dlc `
-    --binary_file "$OutName.ctx" `
-    --output_dir $out `
-    --config_file $extCfg
-if ($LASTEXITCODE -ne 0) { throw "context generation failed ($LASTEXITCODE)" }
+$oldPath = $env:Path
+try {
+    # Dependencies of dynamically loaded host DLLs must resolve from this SDK, too.
+    # Limit the change to this invocation; never persist SDK paths in the user's settings.
+    $env:Path = "$bin;$lib;$oldPath"
+    & (Join-Path $bin 'qnn-context-binary-generator.exe') `
+        --backend (Join-Path $lib 'QnnHtp.dll') `
+        --model (Join-Path $lib 'QnnModelDlc.dll') `
+        --dlc_path $dlc `
+        --binary_file "$OutName.ctx" `
+        --output_dir $out `
+        --config_file $extCfg
+    if ($LASTEXITCODE -ne 0) { throw "context generation failed ($LASTEXITCODE)" }
+} finally { $env:Path = $oldPath }
 Get-ChildItem $out -Filter "$OutName.ctx*" | ForEach-Object { Write-Host $_.FullName $_.Length }
