@@ -22,7 +22,7 @@
 - [ ] Both find the floor → `floor-primary`.
 - [ ] Stock app also finds nothing → `floor-less`: STOP. Re-review the spec with Rachit (§9).
 
-**Gate status: pending.** No floor-primary or floor-less conclusion can be drawn yet. No Android device appeared in `adb devices -l` during preparation. Task 1 and subsequent tasks have not started.
+**Gate status: physical verification deferred by Rachit.** No floor-primary or floor-less conclusion can be drawn yet. No Android device appeared in `adb devices -l` during preparation. Rachit subsequently explicitly authorized implementation without physical tests; the implementation proceeds with floor availability unverified.
 
 ## Preparation and verification
 

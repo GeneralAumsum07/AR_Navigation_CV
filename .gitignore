@@ -65,3 +65,7 @@ Thumbs.db
 /tools/.cache/
 /Assets/StreamingAssets/Models/
 /Assets/StreamingAssets/Models.meta
+
+# Offline Python analysis creates these locally; they are not source artefacts.
+__pycache__/
+*.pyc
