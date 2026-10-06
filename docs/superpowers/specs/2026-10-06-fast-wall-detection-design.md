@@ -16,11 +16,17 @@
 - No limit on app size growth.
 - ML runtime: LiteRT or Qualcomm QNN, **whichever is faster**.
 - Work happens on `main` only.
+- Include **left-wall and right-wall corridor readings** (added to scope 2026-10-06).
 
 **Assumptions (correct these if wrong):**
 
-- The integration surface stays the same: `WallDistanceService.Latest` / `Updated` with
-  *aimed* and *nearest observed* readings in the AR session frame.
+- The integration surface stays backward compatible: `WallDistanceService.Latest` /
+  `Updated` keep the *aimed* and *nearest observed* readings in the AR session frame. The
+  snapshot gains *left*, *right* and *corridor width* fields (§5.5); existing consumers
+  need no changes.
+- "Left" and "right" are relative to the direction the phone points (its camera forward
+  vector projected onto the floor), not to the direction of walking. The phone gives no
+  walking direction separate from where it points.
 - The phone is hand-held at roughly chest height while walking. Camera height is not fixed;
   it is measured from the floor plane every frame.
 - Corridors are Manhattan-like: straight walls meeting at right angles, a flat floor, and
@@ -118,8 +124,10 @@ WallMap (Core, world-anchored) ◄── ARCore vertical planes (as observations
    │  fused walls with extents, covariance, source history
    ▼
 WallMeasurementEngine (existing) ── aimed + nearest, every frame from the current pose
+   │
+CorridorSideSelector (Core) ── left + right + corridor width, every frame
    ▼
-WallDistanceService.Latest / Updated (unchanged API)
+WallDistanceService.Latest / Updated (API extended, backward compatible)
 ```
 
 Two clocks run independently:
@@ -140,6 +148,7 @@ readings arrive at full frame rate.
 | `FloorAlignedDepth` | Robust affine fit `1/z = s·d + t` using floor pixels; floor-plane inliers become the floor mask | image + `FloorPlane` + optional metric samples → `AlignmentResult {s, t, floorMask, inliers, residual, reason}` |
 | `VerticalPlaneExtractor` | Back-projects non-floor pixels with aligned depth. Finds up to 4 vertical planes by RANSAC on the floor-plane projection (2D line fits), checks verticality against gravity, records each segment's extent along the floor | aligned depth → `List<WallObservation>` |
 | `BaseEdgeRefiner` | Projects each observation's floor line into the image. Searches a ±12 px band for the **lowest** strong, collinear intensity edge (avoids the top of a skirting board). Re-fits the floor line from snapped points | `WallObservation` + Y plane + `FloorPlane` → refined `WallObservation` (`FloorEdge` when ≥60% of samples snap) |
+| `CorridorSideSelector` | Picks the left and right walls from the `WallMap` and measures them (§5.5) | `WallMap` + camera pose + `FloorPlane` → left/right `WallReading`s + corridor width |
 | `WallMap` | World-anchored wall tracks. Associates by normal (≤8°) and offset (≤15 cm). Fuses with an information filter on (normal angle, offset); unions extents; ages out unseen walls; resets on session change. Emits `WallCandidate`s with a nominal 2.4 m height, which is a UI extent, not a measurement | observations + ARCore vertical planes → `IReadOnlyList<WallCandidate>` |
 
 Existing code that is reused:
@@ -196,6 +205,56 @@ New `FailureReason` values:
 
 Existing sources and labels are unchanged. Readings remain NaN when invalid, never 0.
 
+### 5.5 Left / right corridor readings
+
+In a corridor, the side walls matter most for navigation. Their closest point is usually
+*beside* the user and outside the camera view. The `WallMap` remembers walls seen earlier
+while walking, so these readings come from the map, not from the current frame.
+
+**Heading.** Forward is the camera forward vector projected onto the floor plane, then
+normalised. If the phone is pointed within 20° of straight down or straight up, there is
+no heading. Both readings are then invalid with `NoHeading`.
+
+**Selecting a side wall.** A `WallMap` wall qualifies for a side when all of these hold:
+
+1. It runs along the heading. The angle between the wall's floor line and the heading is
+   ≤ 30° to become a side wall and > 40° to stop being one. The 10° gap stops a wall
+   flickering between "side" and "ahead" as the phone sways.
+2. It is on that side: the sign of the cross product of the heading and the
+   camera-to-wall vector, about the floor normal, gives left or right.
+3. It is alongside the user. The camera's position projected onto the wall's floor line
+   lies within the wall's observed extent, widened by 1.0 m at each end. This covers the
+   stretch just walked past and the stretch just ahead.
+4. It is fresh: observed within the last 10 s. Walls are static, but an old track may hold
+   an error the map has not yet corrected.
+5. It is close enough: perpendicular distance ≤ 6 m. Beyond that it is not a corridor wall.
+
+If several walls qualify on one side (e.g. a recess next to the main wall), the nearest
+by perpendicular distance wins.
+
+**Value.** The reading is the horizontal perpendicular distance from the camera to the
+wall's vertical plane, measured in the floor plane. Height is ignored. Each side gets its
+own `MeasurementFilter`, which resets when that side's wall id changes. As with *aimed*,
+the filter never blends two different walls.
+
+**Corridor width.** `left + right`, reported only when both are valid and the two walls
+are parallel within 10°. Otherwise it is NaN.
+
+**Quality.** Each side reading inherits the source and quality of the wall track it uses
+(`FloorEdge`, `LearnedDepth`, `CrossChecked`, ...). It adds
+`qualityReason = "out of view, last seen N.N s ago"` when the wall's closest point is not
+currently in view.
+
+**API additions** (backward compatible):
+
+- `MeasurementKind.CorridorLeft`, `MeasurementKind.CorridorRight`
+- `WallDistanceSnapshot.left`, `.right` (`WallReading`), `.corridorWidthMeters` (float, NaN
+  when unavailable)
+- `FailureReason.NoHeading`, `FailureReason.NoWallOnSide`
+
+The HUD shows `L 0.84 m | R 1.12 m | W 1.96 m` beneath the existing readings, and the CSV
+gains `left_*` and `right_*` columns that mirror the `aimed_*` set, plus `corridor_width_m`.
+
 ## 6. Failure handling
 
 | Condition | Behaviour |
@@ -206,6 +265,9 @@ Existing sources and labels are unchanged. Readings remain NaN when invalid, nev
 | Plugin init failure / non-Snapdragon / model missing | `InferenceUnavailable` once; the ARCore path continues; a CSV note is written |
 | Tracking lost | Existing behaviour: invalidate readings, reset filters, keep the `WallMap` only within the same session id |
 | Thermal throttling (inference > 60 ms for 5 s) | Scheduler drops to 5 Hz; logged |
+| Phone pointed at the floor or ceiling (no heading) | Left/right invalid (`NoHeading`); aimed/nearest unaffected |
+| Side wall never observed (e.g. entered a corridor looking at the floor) | That side is `NoWallOnSide` until the wall is detected; no reading is borrowed from the opposite side or from the corridor width |
+| Open side (atrium, junction, doorway gap longer than the 1 m extent margin) | `NoWallOnSide` for that side; the opposite side is unaffected |
 | People walking through view | Rejected by RANSAC: non-planar and non-vertical. A person standing still is accepted as a "wall" — known limitation, same as today's furniture caveat |
 
 ## 7. Logging
@@ -235,6 +297,7 @@ and a grey image for a parameterised corridor:
 | `VerticalPlaneExtractor` | Finds left, right and end walls with offset ≤ 2 cm and normal ≤ 1° on clean data |
 | `BaseEdgeRefiner` | Snaps to the base, not the skirting-board top |
 | `WallMap` | Convergence, association, ageing, and session reset |
+| `CorridorSideSelector` | Correct left/right assignment across camera yaw; 30°/40° hysteresis holds under ±15° sway; extent-margin and freshness cut-offs; recess vs. main wall picks the nearer; width only when parallel; `NoHeading` when pitched near vertical; per-side filter resets on wall change |
 
 **On-device bench scene:**
 
@@ -245,6 +308,9 @@ and a grey image for a parameterised corridor:
 
 - Side walls at 0.5 / 1 / 1.5 / 2 / 3 m; an end wall at 1–5 m.
 - Standing and walking at normal pace.
+- Left/right: stop at marked points while walking down the corridor at the centre line and
+  at 0.5 m off-centre. Tape both lateral distances from the camera position. Include a
+  junction and a doorway gap.
 - Painted plain walls; glossy tiled floors; skirting boards; doors; dim lighting; people.
 - Three trials each, with the tape reference taken from the camera position.
 - Report: time-to-first-valid reading; median and P95 absolute error by source and distance;
@@ -270,11 +336,14 @@ commitments.
 - **Rates:** readings at 30 Hz; detection ≥ 10 Hz sustained for 10 min.
 - **Error:** reported per source. Initial aim is median ≤ 5 cm on corridor side walls at
   1–3 m (`FloorEdge`), then minimised further in Phase 4.
+- **Left/right:** both sides valid for ≥ 90% of time while walking a straight walled
+  corridor, after the first 2 m; same error aim as above; corridor width median error
+  ≤ 8 cm.
 
 ## 11. Out of scope
 
-- A dedicated **left-wall / right-wall corridor reading** (centring aid). The `WallMap`
-  makes this cheap; it needs its own small spec if wanted.
+- Navigation guidance built on left/right (e.g. "move left" prompts or haptics). This
+  spec delivers the readings only.
 - Mini-GPS / campus-map fusion; iOS; ceilings.
 - Semantic "wall vs. furniture" classification.
 - An ML backend for non-Snapdragon phones.
@@ -288,6 +357,8 @@ commitments.
 | w8a16 quantisation distorts depth non-affinely | Phase 1 compares w8a16 vs float on the dumped frames; ship float (31 ms) if the residual is materially worse |
 | Skirting boards / dark kick-plates bias the edge snap | "Lowest collinear edge" rule; synthetic test; specific field condition |
 | Wall base out of view when close (portrait, phone held level, ≲2 m) | `LearnedDepth` path still works; `WallMap` keeps walls seen earlier while approaching |
+| Side walls are seen only at grazing angles (often > 70° from face-on), where monocular depth is weakest | Edge refinement does not depend on viewing angle; the `WallMap` accumulates many grazing views over a walk; the field protocol measures this case directly |
+| Pose drift over a long corridor shifts remembered walls | 10 s freshness limit; walls are re-observed continuously while walking; the AR layer attaches each wall track to an `ARAnchor` (as the assisted mode already does), so ARCore's own map corrections move the track with them |
 | Thermal load from sustained NPU + camera | 15 Hz cap; adaptive drop to 5 Hz; logged |
 
 ## 13. References
