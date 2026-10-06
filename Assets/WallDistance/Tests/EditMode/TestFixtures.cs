@@ -88,5 +88,22 @@ namespace WallDistance.Tests
             }
             return f;
         }
+        /// <summary>
+        /// A wall observation whose base line runs along z from <paramref name="z0"/> to <paramref name="z1"/>
+        /// at x = <paramref name="x"/>. angleDeg = 0 faces -x (a RIGHT wall of a corridor along +z);
+        /// angleDeg = 180 faces +x (a LEFT wall). Other angles yaw the wall about its origin.
+        /// </summary>
+        public static WallObservation Obs(float x, double t, float z0 = 0f, float z1 = 3f, float angleDeg = 0f,
+            MeasurementSource src = MeasurementSource.LearnedDepth, float rms = 0.01f, int inliers = 500, float baseY = 0f)
+        {
+            float half = 0.5f * (z1 - z0);
+            return new WallObservation
+            {
+                origin = new Vector3(x, baseY, 0.5f * (z0 + z1)),
+                normal = Quaternion.AngleAxis(angleDeg, Vector3.up) * Vector3.left,
+                up = Vector3.up, extentMin = -half, extentMax = half,
+                rms = rms, inliers = inliers, source = src, timestamp = t,
+            };
+        }
     }
 }
