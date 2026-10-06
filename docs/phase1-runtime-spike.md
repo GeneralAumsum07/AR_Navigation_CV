@@ -48,3 +48,5 @@ The input's real value range is [0, 1]. QNN scale-offset encoding uses the negat
 ## Packaging
 
 - QNN header compatibility, native library LOAD alignment, DSP skeleton extraction and self-test against qnn-net-run: TBD — build with the pinned SDK and then run the deferred device checks.
+- Task 17 conversion checks: missing `tensor_convert.h` produced the expected RED compiler failure. The completed conversion unit test passes on Windows with MinGW GCC (`__fp16` mapped to its IEEE binary16 `_Float16` storage type for this host-only run) and cross-compiles with Unity's Android ARM64/API-25 Clang. This verifies conversion math and target compilation, not QNN execution.
+- `native/walldepth/build-android.ps1` was attempted and refuses with `QNN_SDK_ROOT is not set (Task 7, Step 1)`. The QNN C++ implementation therefore remains unverified against the pinned SDK headers; the plan itself identifies those recalled SDK symbol names as version-dependent.

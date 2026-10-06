@@ -69,3 +69,9 @@ Thumbs.db
 # Offline Python analysis creates these locally; they are not source artefacts.
 __pycache__/
 *.pyc
+
+# QNN runtime libraries are not ours to commit (licence: Task 7, Step 2), and our own plugin
+# is a build output of native/walldepth.
+/Assets/Plugins/Android/libs/
+/Assets/Plugins/Android/libs.meta
+/native/walldepth/build/
