@@ -38,6 +38,12 @@ namespace WallDistance.AR
 
         public float CollectedHz { get; private set; }
         public double LastInferenceMs { get; private set; } = double.NaN;
+        /// <summary>
+        /// Main-thread milliseconds spent converting the CPU image and resampling it to 518²
+        /// for the last prepared frame. Conversion is synchronous so the pose matches the image
+        /// (deviation D2); this number is how the bench shows what that costs per frame.
+        /// </summary>
+        public double LastPrepareMs { get; private set; } = double.NaN;
         public string Status { get; private set; } = "waiting for camera";
         public int DumpRemaining { get; private set; }
 
@@ -124,9 +130,14 @@ namespace WallDistance.AR
                 int k = InferenceGeometry.ChooseQuarterTurns(sensorPose.rotation, arCamera.transform.up);
                 var geo = InferenceGeometry.Create(image.width, image.height, k, Size);
 
+                // Stopwatch ticks, not Time: realtimeSinceStartup has too coarse a resolution on
+                // some Android builds for a few-millisecond interval.
+                long prepStart = System.Diagnostics.Stopwatch.GetTimestamp();
                 if (!ConvertToRgb(image)) return;
                 var target = _images[_next];
                 Resample(image.width, image.height, geo, target.luma);
+                LastPrepareMs = (System.Diagnostics.Stopwatch.GetTimestamp() - prepStart) * 1000.0
+                                / System.Diagnostics.Stopwatch.Frequency;
                 target.intrinsics = geo.Intrinsics(sensorIntr);
                 target.cameraPose = geo.CameraPose(sensorPose);
                   target.sessionId = SessionId;

@@ -16,6 +16,8 @@ namespace WallDistance.Core
         {
             "infer_ms", "infer_hz", "align_s", "align_t", "align_residual", "floor_inliers",
             "walls_in_map", "aimed_source_chain", "edge_snap_frac", "floor_h_m", "thermal_state", "detect_latency_ms",
+            // Main-thread cost of the synchronous camera-image conversion (plan deviation D2).
+            "prep_ms",
         };
 
         /// <summary>The per-reading set, the same shape as the existing aimed_/nearest_ columns.</summary>

@@ -20,15 +20,16 @@ namespace WallDistance.Tests
         public void AppendedColumns_SpecSection7ThenSidesThenWidth()
         {
             var cols = CsvSchema.AppendedColumns();
-            Assert.AreEqual(12 + 10 + 10 + 1, cols.Length);
+            Assert.AreEqual(13 + 10 + 10 + 1, cols.Length);
             CollectionAssert.AreEqual(new[]
             {
                 "infer_ms", "infer_hz", "align_s", "align_t", "align_residual", "floor_inliers",
                 "walls_in_map", "aimed_source_chain", "edge_snap_frac", "floor_h_m", "thermal_state", "detect_latency_ms",
+                "prep_ms",
             }, CsvSchema.LearnedColumns);
-            Assert.AreEqual("left_valid", cols[12]);
-            Assert.AreEqual("right_reason", cols[31]);
-            Assert.AreEqual("corridor_width_m", cols[32]);
+            Assert.AreEqual("left_valid", cols[13]);
+            Assert.AreEqual("right_reason", cols[32]);
+            Assert.AreEqual("corridor_width_m", cols[33]);
             Assert.AreEqual("floor-aligned-v1", CsvSchema.Revision);
         }
     }

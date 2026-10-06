@@ -155,6 +155,7 @@ namespace WallDistance.AR
                 ? service.floorSource.CurrentPlane.HeightAbove(s.aimed.cameraPose.position) : float.NaN);
             Append(ThermalStatus.Current);
             Append(pipe.LastDetectLatencyMs);
+            Append(sch != null ? sch.LastPrepareMs : double.NaN);
 
             AppendReading(s.left, true);
             AppendReading(s.right, true);
