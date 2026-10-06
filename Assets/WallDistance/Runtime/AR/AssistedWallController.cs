@@ -128,7 +128,8 @@ namespace WallDistance.AR
                     var p = _planes.GetPlane(hit.trackableId);
                     if (p == null || p.alignment != PlaneAlignment.HorizontalUp || p.trackingState != TrackingState.Tracking) continue;
                     float height = camera.transform.position.y-hit.pose.position.y;
-                    if (height < 0.4f || height > 2.5f || hit.distance > 4f) continue;
+                    // Same camera-height bounds as the learned floor, so both modes agree on what a floor is.
+                    if (height < FloorPlane.MinCameraHeight || height > FloorPlane.MaxCameraHeight || hit.distance > 4f) continue;
                     _floor=p; _target=hit.pose.position; _targetValid=true; return;
                 }
             if (_first != null && _first.trackingState == TrackingState.Tracking && _floor != null)
