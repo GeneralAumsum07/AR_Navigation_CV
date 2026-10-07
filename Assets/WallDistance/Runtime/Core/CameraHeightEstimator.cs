@@ -61,7 +61,7 @@ namespace WallDistance.Core
         /// </summary>
         public void MarkDiscontinuity()
         {
-            if (_hasHeld && !float.IsNaN(_lastCameraY) && !_carryPending)
+            if (Ready && _hasHeld && !float.IsNaN(_lastCameraY) && !_carryPending)
             {
                 _carryHeight = _lastCameraY - _heldFloorY;
                 _carryPending = true;
@@ -79,20 +79,23 @@ namespace WallDistance.Core
             if (_carryPending)
             {
                 _carryPending = false;
-                _hasHeld = true;
-                _heldFloorY = camera.y - _carryHeight;
-                _heldAt = now;
+                // A coordinate-frame change is not a metric observation. Preserve evidence age,
+                // including time spent without tracking, rather than restarting a 20 s hold.
+                _hasHeld = now - _heldAt <= _cfg.heightHoldSeconds;
+                if (_hasHeld) _heldFloorY = camera.y - _carryHeight;
             }
             _lastCameraY = camera.y;
 
-            Evaluate(out bool enough, out float estimate, out float spread);
+            Evaluate(out bool enough, out float estimate, out float spread, out double evidenceAt);
             SpreadMeters = spread;
             bool ok;
             if (enough && spread <= _cfg.maxHeightSpreadMeters)
             {
                 _hasHeld = true;
                 _heldFloorY = estimate;
-                _heldAt = now;
+                // Reading the same window again must not make its clues any younger. Expiry is
+                // tied to the newest supporting clue, so it does not depend on update cadence.
+                _heldAt = evidenceAt;
                 ok = true;
             }
             else if (!enough && _hasHeld && now - _heldAt <= _cfg.heightHoldSeconds)
@@ -106,6 +109,9 @@ namespace WallDistance.Core
             Ready = ok;
             if (!ok)
             {
+                // Contradictions or expiry revoke the hold, not just this frame's output. Once
+                // bad clues age out, their absence cannot resurrect the floor they invalidated.
+                _hasHeld = false;
                 floor = default;
                 FloorY = HeightMeters = float.NaN;
                 return false;
@@ -143,7 +149,7 @@ namespace WallDistance.Core
             _clues.RemoveRange(keep, _clues.Count - keep);
         }
 
-        void Evaluate(out bool enough, out float estimate, out float spread)
+        void Evaluate(out bool enough, out float estimate, out float spread, out double evidenceAt)
         {
             int n = _clues.Count;
             if (_v.Length < n)
@@ -164,6 +170,7 @@ namespace WallDistance.Core
             }
             WindowWeight = total;
             WindowClues = n;
+            evidenceAt = last;
             enough = n >= _cfg.minHeightClues && total >= _cfg.minHeightWeight && last - first >= _cfg.minHeightSpanSeconds;
             if (n == 0)
             {

@@ -156,5 +156,65 @@ namespace WallDistance.Tests
             Assert.IsFalse(e.IsCalibrating(2.1));
             Assert.AreEqual(0, e.WindowClues);
         }
+
+        [Test]
+        public void ExpiredEstimate_DiscontinuityDoesNotReviveIt()
+        {
+            var e = new CameraHeightEstimator(new DetectionConfig());
+            Assert.IsTrue(Feed(e, 0, 2, 0, out _));
+            Assert.IsFalse(e.TryFloor(Camera14, 25, out _));
+            e.MarkDiscontinuity();
+            Assert.IsFalse(e.TryFloor(new Vector3(0, 5, 0), 26, out _),
+                "a tracking interruption supplies no new metric evidence");
+        }
+
+        [Test]
+        public void LongTrackingGap_DoesNotRefreshPendingCarry()
+        {
+            var e = new CameraHeightEstimator(new DetectionConfig());
+            Assert.IsTrue(Feed(e, 0, 2, 0, out _));
+            e.MarkDiscontinuity();
+            Assert.IsFalse(e.TryFloor(new Vector3(0, 5, 0), 25, out _),
+                "height evidence can expire while tracking is absent");
+        }
+
+        [Test]
+        public void RepeatedDiscontinuities_PreserveOriginalEvidenceAge()
+        {
+            var e = new CameraHeightEstimator(new DetectionConfig());
+            Assert.IsTrue(Feed(e, 0, 2, 0, out _));
+            e.MarkDiscontinuity();
+            Assert.IsTrue(e.TryFloor(new Vector3(0, 5, 0), 3, out _));
+            e.MarkDiscontinuity();
+            Assert.IsTrue(e.TryFloor(new Vector3(0, 8, 0), 10, out _));
+            e.MarkDiscontinuity();
+            Assert.IsFalse(e.TryFloor(new Vector3(0, 3, 0), 22.5, out _),
+                "moving the coordinate frame must not restart the hold clock");
+        }
+
+        [Test]
+        public void ContradictoryEvidence_CannotReviveAfterWindowExpires()
+        {
+            var e = new CameraHeightEstimator(new DetectionConfig());
+            Assert.IsTrue(Feed(e, 0, 2, 0, out _));
+            for (int k = 21; k <= 75; k++)
+            {
+                e.Add(Clue(k * 0.1, 0.4f * (k % 9) / 8f));
+                e.TryFloor(Camera14, k * 0.1, out _);
+            }
+            Assert.IsFalse(e.Ready);
+            Assert.IsFalse(e.TryFloor(Camera14, 13, out _),
+                "forgetting contradictions is not fresh evidence for the rejected floor");
+            Assert.AreEqual(0, e.WindowClues);
+        }
+
+        [Test]
+        public void ContinuousUpdates_DoNotRenewHoldWithoutNewClues()
+        {
+            var e = new CameraHeightEstimator(new DetectionConfig());
+            Assert.IsTrue(Feed(e, 0, 2, 0, out _));
+            for (int k = 21; k <= 225; k++) e.TryFloor(Camera14, k * 0.1, out _);
+            Assert.IsFalse(e.Ready, "20.5 s since the final clue, irrespective of update cadence");
+        }
     }
 }
