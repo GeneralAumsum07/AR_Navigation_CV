@@ -1,3 +1,4 @@
+using System.Globalization;
 using UnityEngine;
 using UnityEngine.UI;
 using WallDistance.Core;
@@ -5,33 +6,46 @@ using WallDistance.Core;
 namespace WallDistance.AR
 {
     /// <summary>
-    /// Demo HUD: both distances, quality states, crosshair, and a record toggle. Builds its own
-    /// Canvas at runtime so the scene contains no fragile hand-wired UI. Purely a consumer of
-    /// <see cref="WallDistanceService"/> - nothing here feeds back into measurement.
+    /// Demo HUD. Builds its own Canvas at runtime so the scene contains no fragile hand-wired UI,
+    /// and is purely a consumer of <see cref="WallDistanceService"/> - nothing here feeds back
+    /// into measurement.
+    ///
+    /// Layout (reference 1080x2400): the main view carries only what someone walking a corridor
+    /// reads - an alert line that appears only when something is wrong, the crosshair with the
+    /// aimed distance under it, and at the bottom the left/right/width line and the nearest wall
+    /// with its compass bearing. Everything for testers (stats, inference status, CSV recording,
+    /// frame dumps) lives in a drawer behind the "Debug" button, closed by default, so it can
+    /// never cover the crosshair again (the old Dump button sat right on top of it).
+    ///
+    /// Assisted Floor mode has no UI any more (removed at Rachit's request): without a button its
+    /// controller is never activated, so automatic detection is the only mode.
     /// </summary>
     public sealed class WallDistanceHud : MonoBehaviour
     {
         public WallDistanceService service;
         public MeasurementCsvRecorder recorder;
 
-        Text _aimedText, _nearestText, _stateText, _statsText, _recordText, _sidesText;
+        // Main view.
+        Text _alertText, _aimedText, _aimedDetail, _sidesText, _sidesHint, _nearestText, _recIndicator;
         Image _crosshair;
-        Button _recordButton;
-        Text _instruction, _modeText, _captureText, _dumpText;
-        Button _captureButton;
+        // Debug drawer.
+        GameObject _drawer;
+        Text _statsText, _recordText, _dumpText;
         WallCompass _compass;
 
+        static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
         static readonly Color ColorGood = new Color(0.35f, 0.95f, 0.45f);
         static readonly Color ColorEstimate = new Color(1f, 0.85f, 0.3f);
         static readonly Color ColorBad = new Color(1f, 0.4f, 0.35f);
         static readonly Color ColorMuted = new Color(0.8f, 0.8f, 0.8f);
+        static readonly Color ColorButton = new Color(0.03f, 0.15f, 0.22f, 0.9f);
 
         void Awake()
         {
             if (service == null) service = FindAnyObjectByType<WallDistanceService>();
             if (recorder == null) recorder = FindAnyObjectByType<MeasurementCsvRecorder>();
             BuildUi();
-            _compass=gameObject.AddComponent<WallCompass>();
+            _compass = gameObject.AddComponent<WallCompass>();
         }
 
         void OnEnable() { if (service != null) service.Updated += OnUpdated; }
@@ -39,71 +53,105 @@ namespace WallDistance.AR
 
         void OnUpdated(WallDistanceSnapshot s)
         {
-            if (service.Assisted != null)
-            {
-                _instruction.text = service.Assisted.Instruction;
-                _modeText.text = service.Assisted.Active ? "Switch to Automatic" : "Use Assisted Floor";
-                _captureButton.gameObject.SetActive(service.Assisted.Active && !service.Assisted.HasWall);
-                _captureButton.interactable = service.Assisted.CanCapture;
-                _captureText.text = service.Assisted.CaptureLabel;
-            }
+            // A recording keeps running with the drawer closed, so its state must stay visible.
+            _recIndicator.enabled = recorder != null && recorder.IsRecording;
+            if (_drawer.activeSelf) UpdateDrawer();
+
             // Session-level state first: if AR is not tracking nothing else is meaningful.
             if (service.State != WallDistanceSessionState.Tracking)
             {
-                _stateText.text = service.StateDetail;
-                _stateText.color = ColorBad;
-                _aimedText.text = "Aimed wall: —";
-                _nearestText.text = "Nearest observed wall: —";
-                _aimedText.color = _nearestText.color = ColorMuted;
+                ShowAlert(service.StateDetail, ColorBad);
+                _aimedText.text = "—";
+                _aimedText.color = ColorMuted;
+                _aimedDetail.text = "";
                 _crosshair.color = ColorMuted;
-                _sidesText.text = "L — | R — | W —";
+                _sidesText.text = ReadingText.Sides(default, default, float.NaN);
                 _sidesText.color = ColorMuted;
+                _sidesHint.text = "";
+                _nearestText.text = "";
+                return;
+            }
+
+            // Degraded-mode warnings only. The full ML status string is a tester's concern and
+            // lives in the drawer; here the user only needs to know the numbers are planes-only.
+            string alert = "";
+            if (!service.InferenceAvailable) alert = "ML depth not running: ARCore planes only";
+            if (!s.depthSupported) alert += (alert.Length > 0 ? "\n" : "") + "Depth API unavailable: plane estimates only";
+            ShowAlert(alert, ColorEstimate);
+
+            RenderAimed(s.aimed);
+
+            _sidesText.text = ReadingText.Sides(s.left, s.right, s.corridorWidthMeters);
+            _sidesText.color = s.left.isValid && s.right.isValid ? Color.white : ColorMuted;
+            _sidesHint.text = ReadingText.SidesHint(s.left, s.right);
+
+            if (s.nearest.isValid)
+            {
+                _nearestText.text = $"Nearest wall {s.nearest.distanceMeters.ToString("F2", Inv)} m · {_compass.Describe(s.nearest)}";
+                _nearestText.color = QualityColor(s.nearest.quality);
             }
             else
             {
-                // Learned depth state: shown while loading or failed, so "planes only" is never silent.
-                string ml = service.InferenceAvailable ? "" : "ML depth: " + service.InferenceStatus + " (ARCore planes only)";
-                string depthMsg = s.depthSupported ? "" : "Depth API unavailable on this device: plane estimates only";
-                _stateText.text = ml.Length > 0 && depthMsg.Length > 0 ? ml + "\n" + depthMsg : ml + depthMsg;
-                _stateText.color = ColorEstimate;
-                Render(_aimedText, "Aimed wall", s.aimed);
-                Render(_nearestText, "Nearest observed wall", s.nearest);
-                if (s.aimed.isValid) _aimedText.text += "\n"+_compass.Describe(s.aimed);
-                if (s.nearest.isValid) _nearestText.text += "\n"+_compass.Describe(s.nearest);
-                if (!service.Assisted.Active) _instruction.text="Scan slowly. Green: aimed wall · Cyan: closest detected\nDistances and closest ranking are approximate";
-                _crosshair.color = s.aimed.isValid ? QualityColor(s.aimed.quality) : ColorMuted;
-                _sidesText.text = ReadingText.Sides(s.left, s.right, s.corridorWidthMeters);
-                string hint = ReadingText.SidesHint(s.left, s.right);
-                if (hint.Length > 0) _sidesText.text += "  (" + hint + ")";
-                _sidesText.color = s.left.isValid && s.right.isValid ? Color.white : ColorMuted;
+                _nearestText.text = "Nearest wall — (" + ReadingText.Failure(s.nearest.failure) + ")";
+                _nearestText.color = ColorMuted;
             }
-
-            var sch = service.scheduler;
-            _statsText.text = $"{(1f / Mathf.Max(Time.unscaledDeltaTime, 1e-4f)):F0} fps · {service.UpdateRate:F0} upd/s · " +
-                              $"ML {(sch != null ? sch.CollectedHz : 0f):F0} Hz {(sch != null ? sch.LastInferenceMs : double.NaN):F0} ms · " +
-                              $"{service.Pipeline.Map.Tracks.Count} walls · " +
-                              $"{service.candidateSource?.TrackedVerticalPlaneCount ?? 0}/{service.candidateSource?.TotalPlaneCount ?? 0} planes";
-            if (recorder != null)
-                _recordText.text = recorder.IsRecording ? $"■ Stop ({recorder.RowsWritten} rows)" : "● Record CSV";
-            if (_dumpText != null && service.scheduler != null)
-                _dumpText.text = service.scheduler.DumpRemaining > 0 ? $"Dumping… {service.scheduler.DumpRemaining} left" : "Dump frames (20)";
         }
 
-        static void Render(Text t, string label, WallReading r)
+        void ShowAlert(string text, Color color)
+        {
+            // Hidden rather than blank so its outline box never darkens the camera view.
+            _alertText.enabled = !string.IsNullOrEmpty(text);
+            _alertText.text = text ?? "";
+            _alertText.color = color;
+        }
+
+        void RenderAimed(WallReading r)
         {
             if (!r.isValid)
             {
-                t.text = $"{label}: — ({ReadingText.Failure(r.failure)})";
-                // A failed depth fit should tell the tester why there is no number.
-                // Otherwise absent raw support looks indistinguishable from a UI failure.
-                if (r.kind == MeasurementKind.Aimed && !string.IsNullOrEmpty(r.qualityReason)
-                    && r.qualityReason != r.failure.ToString())
-                    t.text += "\n" + r.qualityReason;
-                t.color = ColorMuted;
+                _aimedText.text = "—";
+                _aimedText.color = ColorMuted;
+                _aimedDetail.text = ReadingText.Failure(r.failure);
+                // A failed depth fit should tell the tester why there is no number; otherwise absent
+                // raw support looks indistinguishable from a UI failure.
+                if (!string.IsNullOrEmpty(r.qualityReason) && r.qualityReason != r.failure.ToString())
+                    _aimedDetail.text += " · " + r.qualityReason;
+                _aimedDetail.color = ColorMuted;
+                _crosshair.color = ColorMuted;
                 return;
             }
-            t.text = $"{label}: {r.distanceMeters:F2} m  [{ReadingText.Quality(r.quality)}]";
-            t.color = QualityColor(r.quality);
+            Color c = QualityColor(r.quality);
+            _aimedText.text = r.distanceMeters.ToString("F2", Inv) + " m";
+            _aimedText.color = c;
+            _aimedDetail.text = ReadingText.Quality(r.quality) + " · " + _compass.Describe(r);
+            _aimedDetail.color = c;
+            _crosshair.color = c;
+        }
+
+        void UpdateDrawer()
+        {
+            var sch = service.scheduler;
+            var pipe = service.Pipeline;
+            var cs = service.candidateSource;
+            // The same three signals the CSV logs (sched_status, infer_status, frames_dropped), so a
+            // tester can see a silent stall live instead of only in a recording afterwards.
+            _statsText.text =
+                $"{(1f / Mathf.Max(Time.unscaledDeltaTime, 1e-4f)):F0} fps · {service.UpdateRate:F0} upd/s · " +
+                $"ML {(sch != null ? sch.CollectedHz : 0f):F0} Hz {(sch != null ? sch.LastInferenceMs : double.NaN):F0} ms\n" +
+                $"{pipe.Map.Tracks.Count} walls · {cs?.TrackedVerticalPlaneCount ?? 0}/{cs?.TotalPlaneCount ?? 0} planes · " +
+                $"{pipe.FramesDropped} results dropped\n" +
+                $"ML: {service.InferenceStatus}\n" +
+                $"Scheduler: {(sch != null ? sch.Status : "none")}";
+            if (recorder != null)
+                _recordText.text = recorder.IsRecording ? $"■ Stop ({recorder.RowsWritten} rows)" : "● Record CSV";
+            if (_dumpText != null && sch != null)
+                _dumpText.text = sch.DumpRemaining > 0 ? $"Dumping… {sch.DumpRemaining} left" : "Dump frames (20)";
+        }
+
+        void ToggleDrawer()
+        {
+            _drawer.SetActive(!_drawer.activeSelf);
+            if (_drawer.activeSelf) UpdateDrawer();
         }
 
         static Color QualityColor(QualityLabel q)
@@ -117,7 +165,7 @@ namespace WallDistance.AR
                 case QualityLabel.LearnedEstimate: return ColorEstimate;
                 case QualityLabel.PlaneEstimate: return ColorEstimate;
                 case QualityLabel.DepthEstimate: return ColorEstimate;
-                case QualityLabel.AssistedEstimate: return new Color(0.3f,0.85f,1f);
+                case QualityLabel.AssistedEstimate: return new Color(0.3f, 0.85f, 1f);
                 case QualityLabel.OutOfTestedRange: return ColorEstimate;
                 default: return ColorBad;
             }
@@ -135,62 +183,47 @@ namespace WallDistance.AR
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1080, 2400);
             scaler.matchWidthOrHeight = 0.5f;
+            var root = canvasGo.transform;
 
             var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            var top = new Vector2(0.5f, 1f);
+            var centre = new Vector2(0.5f, 0.5f);
+            var bottom = new Vector2(0.5f, 0f);
 
-            _stateText = MakeText(canvasGo.transform, "State", font, 40, new Vector2(0.5f, 1f), new Vector2(0, -120), new Vector2(1000, 120));
-            _aimedText = MakeText(canvasGo.transform, "Aimed", font, 48, new Vector2(0.5f, 0f), new Vector2(0, 520), new Vector2(1000, 80));
-            _nearestText = MakeText(canvasGo.transform, "Nearest", font, 48, new Vector2(0.5f, 0f), new Vector2(0, 430), new Vector2(1000, 80));
-            _statsText = MakeText(canvasGo.transform, "Stats", font, 30, new Vector2(0.5f, 0f), new Vector2(0, 360), new Vector2(1000, 50));
-            _statsText.color = ColorMuted;
-            _instruction = MakeText(canvasGo.transform,"Instructions",font,36,new Vector2(0.5f,1f),
-                new Vector2(0,-270),new Vector2(960,170));
-            _aimedText.rectTransform.anchoredPosition = new Vector2(0,760);
-            _aimedText.fontSize = 38;
-            _nearestText.rectTransform.anchoredPosition = new Vector2(0,610);
-            _nearestText.fontSize = 36;
-            _statsText.rectTransform.anchoredPosition = new Vector2(0,530);
-            // Between the stats line (530) and the mode buttons (360): spec §5.5's single line.
-            _sidesText = MakeText(canvasGo.transform, "Sides", font, 34, new Vector2(0.5f, 0f), new Vector2(0, 460), new Vector2(1000, 60));
-            MakeButton(canvasGo.transform,font,"Mode",new Vector2(-250,360),new Vector2(470,100),
-                () => service.Assisted.ToggleMode(),out _modeText);
-            MakeButton(canvasGo.transform,font,"Reselect",new Vector2(250,360),new Vector2(470,100),
-                () => service.Assisted.ClearSelection(),out var resetLabel);
-            resetLabel.text = "Reselect wall";
-            _captureButton = MakeButton(canvasGo.transform,font,"CaptureBase",new Vector2(0,1030),new Vector2(800,110),
-                () => service.Assisted.Capture(),out _captureText);
+            // Top row, 110 px down to clear the status bar and the punch-hole camera.
+            _recIndicator = MakeText(root, "RecIndicator", font, 34, new Vector2(0f, 1f), new Vector2(120, -110), new Vector2(200, 70));
+            _recIndicator.text = "● REC";
+            _recIndicator.color = ColorBad;
+            _recIndicator.enabled = false;
+            MakeButton(root, font, "DebugToggle", new Vector2(1f, 1f), new Vector2(-130, -110), new Vector2(200, 90),
+                ToggleDrawer, out var debugLabel);
+            debugLabel.text = "Debug";
+            // Below the top row so a two-line alert never runs under the Debug button.
+            _alertText = MakeText(root, "Alert", font, 36, top, new Vector2(0, -230), new Vector2(1000, 130));
+            _alertText.enabled = false;
 
-            // Crosshair: a small ring drawn as a square outline is good enough for a demo.
+            // Crosshair at the exact screen centre: the aimed reading measures through this point.
             var chGo = new GameObject("Crosshair", typeof(Image));
-            chGo.transform.SetParent(canvasGo.transform, false);
+            chGo.transform.SetParent(root, false);
             _crosshair = chGo.GetComponent<Image>();
             _crosshair.color = ColorMuted;
+            _crosshair.raycastTarget = false;
             var chRt = _crosshair.rectTransform;
-            chRt.anchorMin = chRt.anchorMax = new Vector2(0.5f, 0.5f);
-            chRt.sizeDelta = new Vector2(12, 12);
+            chRt.anchorMin = chRt.anchorMax = centre;
+            chRt.sizeDelta = new Vector2(16, 16);
+            // Aimed distance just below the crosshair, where the eye already is.
+            _aimedText = MakeText(root, "Aimed", font, 64, centre, new Vector2(0, -110), new Vector2(1000, 90));
+            _aimedDetail = MakeText(root, "AimedDetail", font, 30, centre, new Vector2(0, -180), new Vector2(1000, 60));
 
-            var btnGo = new GameObject("RecordButton", typeof(Image), typeof(Button));
-            btnGo.transform.SetParent(canvasGo.transform, false);
-            btnGo.GetComponent<Image>().color = new Color(0, 0, 0, 0.55f);
-            var btnRt = btnGo.GetComponent<RectTransform>();
-            btnRt.anchorMin = btnRt.anchorMax = new Vector2(0.5f, 0f);
-            btnRt.anchoredPosition = new Vector2(0, 200);
-            btnRt.sizeDelta = new Vector2(520, 110);
-            _recordButton = btnGo.GetComponent<Button>();
-            _recordButton.onClick.AddListener(() => recorder?.Toggle());
-            _recordText = MakeText(btnGo.transform, "Label", font, 40, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(520, 110));
-            _recordText.text = "● Record CSV";
+            // Bottom block, above the gesture bar: sides are the corridor reading, so they are largest.
+            _sidesText = MakeText(root, "Sides", font, 50, bottom, new Vector2(0, 420), new Vector2(1040, 80));
+            _sidesHint = MakeText(root, "SidesHint", font, 30, bottom, new Vector2(0, 355), new Vector2(1000, 50));
+            _sidesHint.color = ColorMuted;
+            _nearestText = MakeText(root, "Nearest", font, 34, bottom, new Vector2(0, 250), new Vector2(1000, 100));
 
-            // Phase 1 data capture (spec §7 debug toggle). Development builds only, so field
-            // users never fill their storage with dumps.
-            if (Debug.isDebugBuild)
-            {
-                MakeButton(canvasGo.transform, font, "Dump", new Vector2(0, 1160), new Vector2(600, 100),
-                    () => { if (service.scheduler != null) service.scheduler.RequestDump(20); }, out _dumpText);
-                _dumpText.text = "Dump frames (20)";
-            }
+            BuildDrawer(root, font);
 
-            // An EventSystem is required for the button; create one only if the scene lacks it.
+            // An EventSystem is required for the buttons; create one only if the scene lacks it.
             if (FindAnyObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
             {
                 var es = new GameObject("EventSystem", typeof(UnityEngine.EventSystems.EventSystem));
@@ -201,6 +234,37 @@ namespace WallDistance.AR
                 es.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
 #endif
             }
+        }
+
+        void BuildDrawer(Transform root, Font font)
+        {
+            // Spans y 310-850 from the top: below the alert line (165-295), so the two never
+            // overlap, and well clear of the centre crosshair (y 1200).
+            _drawer = new GameObject("DebugDrawer", typeof(Image));
+            _drawer.transform.SetParent(root, false);
+            _drawer.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.7f);
+            var rt = _drawer.GetComponent<RectTransform>();
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 1f);
+            rt.anchoredPosition = new Vector2(0, -580);
+            rt.sizeDelta = new Vector2(1020, 540);
+            var panel = _drawer.transform;
+
+            _statsText = MakeText(panel, "Stats", font, 28, new Vector2(0.5f, 1f), new Vector2(0, -130), new Vector2(970, 230));
+            _statsText.alignment = TextAnchor.UpperLeft;
+            _statsText.color = ColorMuted;
+
+            // Record is available in every build (the field protocol needs it); frame dumps only
+            // in development builds, so field users never fill their storage with them.
+            MakeButton(panel, font, "RecordButton", new Vector2(0.5f, 0f), new Vector2(-250, 90), new Vector2(470, 110),
+                () => recorder?.Toggle(), out _recordText);
+            _recordText.text = "● Record CSV";
+            if (Debug.isDebugBuild)
+            {
+                MakeButton(panel, font, "Dump", new Vector2(0.5f, 0f), new Vector2(250, 90), new Vector2(470, 110),
+                    () => { if (service.scheduler != null) service.scheduler.RequestDump(20); }, out _dumpText);
+                _dumpText.text = "Dump frames (20)";
+            }
+            _drawer.SetActive(false);
         }
 
         static Text MakeText(Transform parent, string name, Font font, int size, Vector2 anchor, Vector2 pos, Vector2 sizeDelta)
@@ -214,6 +278,8 @@ namespace WallDistance.AR
             t.horizontalOverflow = HorizontalWrapMode.Wrap;
             t.verticalOverflow = VerticalWrapMode.Overflow;
             t.color = Color.white;
+            // Labels must never swallow taps meant for the buttons beneath or around them.
+            t.raycastTarget = false;
             go.GetComponent<Outline>().effectColor = new Color(0, 0, 0, 0.9f);
             var rt = t.rectTransform;
             rt.anchorMin = rt.anchorMax = anchor;
@@ -222,17 +288,19 @@ namespace WallDistance.AR
             return t;
         }
 
-        static Button MakeButton(Transform parent, Font font, string name, Vector2 pos, Vector2 size,
+        static Button MakeButton(Transform parent, Font font, string name, Vector2 anchor, Vector2 pos, Vector2 size,
             UnityEngine.Events.UnityAction action, out Text label)
         {
-            var go = new GameObject(name,typeof(Image),typeof(Button));
-            go.transform.SetParent(parent,false);
-            go.GetComponent<Image>().color = new Color(0.03f,0.15f,0.22f,0.9f);
+            var go = new GameObject(name, typeof(Image), typeof(Button));
+            go.transform.SetParent(parent, false);
+            go.GetComponent<Image>().color = ColorButton;
             var rt = go.GetComponent<RectTransform>();
-            rt.anchorMin=rt.anchorMax=new Vector2(0.5f,0); rt.anchoredPosition=pos; rt.sizeDelta=size;
-            var button=go.GetComponent<Button>(); button.onClick.AddListener(action);
-            label=MakeText(go.transform,"Label",font,32,new Vector2(0.5f,0.5f),Vector2.zero,size);
-            label.raycastTarget=false;
+            rt.anchorMin = rt.anchorMax = anchor;
+            rt.anchoredPosition = pos;
+            rt.sizeDelta = size;
+            var button = go.GetComponent<Button>();
+            button.onClick.AddListener(action);
+            label = MakeText(go.transform, "Label", font, 32, new Vector2(0.5f, 0.5f), Vector2.zero, size);
             return button;
         }
     }
