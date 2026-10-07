@@ -149,7 +149,7 @@ readings arrive at full frame rate.
 | `VerticalPlaneExtractor` | Back-projects non-floor pixels with aligned depth. Finds up to 4 vertical planes by RANSAC on the floor-plane projection (2D line fits), checks verticality against gravity, records each segment's extent along the floor | aligned depth → `List<WallObservation>` |
 | `BaseEdgeRefiner` | Projects each observation's floor line into the image. Searches a ±12 px band for the **lowest** strong, collinear intensity edge (avoids the top of a skirting board). Re-fits the floor line from snapped points | `WallObservation` + Y plane + `FloorPlane` → refined `WallObservation` (`FloorEdge` when ≥60% of samples snap) |
 | `CorridorSideSelector` | Picks the left and right walls from the `WallMap` and measures them (§5.5) | `WallMap` + camera pose + `FloorPlane` → left/right `WallReading`s + corridor width |
-| `WallMap` | World-anchored wall tracks. Associates by normal (≤8°) and offset (≤15 cm). Fuses with an information filter on (normal angle, offset); unions extents; ages out unseen walls; resets on session change. Emits `WallCandidate`s with a nominal 2.4 m height, which is a UI extent, not a measurement | observations + ARCore vertical planes → `IReadOnlyList<WallCandidate>` |
+| `WallMap` | World-anchored wall tracks. Associates by normal (≤8°) and offset (≤15 cm, widened to 12% of viewing range for learned observations; one observation matching several tracks merges them into the most-observed). Drops observations whose base line passes within 0.3 m of the camera. Clears on lost tracking or a pose jump; removes walls the current depth frame sees past for 3 consecutive frames (revised 2026-10-07). Fuses with an information filter on (normal angle, offset); unions extents; ages out unseen walls; resets on session change. Emits `WallCandidate`s with a nominal 2.4 m height, which is a UI extent, not a measurement | observations + ARCore vertical planes → `IReadOnlyList<WallCandidate>` |
 
 Existing code that is reused:
 
@@ -227,13 +227,16 @@ no heading. Both readings are then invalid with `NoHeading`.
    stretch just walked past and the stretch just ahead.
 4. It is fresh: observed within the last 10 s. Walls are static, but an old track may hold
    an error the map has not yet corrected.
-5. It is close enough: perpendicular distance ≤ 6 m. Beyond that it is not a corridor wall.
+5. It is close enough: distance (see *Value*) ≤ 6 m. Beyond that it is not a corridor wall.
 
 If several walls qualify on one side (e.g. a recess next to the main wall), the nearest
-by perpendicular distance wins.
+by that distance wins.
 
-**Value.** The reading is the horizontal perpendicular distance from the camera to the
-wall's vertical plane, measured in the floor plane. Height is ignored. Each side gets its
+**Value.** The reading is the horizontal distance from the camera to the wall's base
+segment, measured in the floor plane. Height is ignored. While the camera is alongside the
+wall's extent this is the perpendicular distance. Within the 1 m margin past an end it is the
+distance to that end. *(Revised 2026-10-07: measuring to the extended line let an end-on
+segment whose line passed through the phone read 0.04 m.)* Each side gets its
 own `MeasurementFilter`, which resets when that side's wall id changes. As with *aimed*,
 the filter never blends two different walls.
 
