@@ -20,7 +20,7 @@ namespace WallDistance.Tests
         public void AppendedColumns_SpecSection7ThenSidesThenWidth()
         {
             var cols = CsvSchema.AppendedColumns();
-            Assert.AreEqual(20 + 10 + 10 + 1, cols.Length);
+            Assert.AreEqual(27 + 10 + 10 + 1, cols.Length);
             CollectionAssert.AreEqual(new[]
             {
                 "infer_ms", "infer_hz", "align_s", "align_t", "align_residual", "floor_inliers",
@@ -32,10 +32,12 @@ namespace WallDistance.Tests
                 "pose_jumps", "floor_jumps",
                 // Map integrity: clears on lost tracking, walls removed because the camera saw through them.
                 "map_clears", "walls_carved",
+                // Floor-free scale: which floor scaled the frame and how sure the height estimate is.
+                "floor_source", "height_m", "height_spread_m", "height_weight", "selfalign_ok", "selfalign_ms", "clue_samples",
             }, CsvSchema.LearnedColumns);
-            Assert.AreEqual("left_valid", cols[20]);
-            Assert.AreEqual("right_reason", cols[39]);
-            Assert.AreEqual("corridor_width_m", cols[40]);
+            Assert.AreEqual("left_valid", cols[27]);
+            Assert.AreEqual("right_reason", cols[46]);
+            Assert.AreEqual("corridor_width_m", cols[47]);
             Assert.AreEqual("floor-aligned-v1", CsvSchema.Revision);
         }
     }

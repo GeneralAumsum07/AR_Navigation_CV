@@ -70,8 +70,14 @@ namespace WallDistance.AR
         /// <summary>Wall-map clears caused by lost tracking or pose jumps this session; CSV diagnostic.</summary>
         public int MapClears => _continuity.Clears;
         readonly List<MetricSample> _metric = new List<MetricSample>(4096);
-        // Raw depth is ~160x90; every 2nd pixel gives up to ~3600 samples, well above the 200 minimum.
-        const int MetricStride = 2;
+        // Raw depth is ~160x90 = 14 400 pixels; every one is read. On glossy corridors only ~35 of
+        // them are confident (run 150956), and each is a camera-height clue for the derived floor.
+        const int MetricStride = 1;
+        FloorResolver _floorResolver;
+        /// <summary>Chooses ARCore's floor or a derived one for each inference frame (floor-free design).</summary>
+        public FloorResolver FloorResolver => _floorResolver;
+        /// <summary>The floor the last inference frame was scaled against; invalid when there was none.</summary>
+        public FloorPlane ActiveFloor { get; private set; }
 
         /// <summary>Raised after every measurement update with the fresh snapshot.</summary>
         public event Action<WallDistanceSnapshot> Updated;
@@ -102,6 +108,8 @@ namespace WallDistance.AR
             config.allowDenseDetection = true;
             // Before NewSessionId, which resets it.
             _poseGuard = new PoseJumpGuard(config);
+            // Before NewSessionId, which resets it.
+            _floorResolver = new FloorResolver(config.detection);
             NewSessionId();
             Assisted = GetComponent<AssistedWallController>();
             if (Assisted == null) Assisted = gameObject.AddComponent<AssistedWallController>();
@@ -173,12 +181,15 @@ namespace WallDistance.AR
             // Captured before tracking (re)started: posed in a frame the map no longer trusts.
             if (!_continuity.Accepts(img.timestamp)) return;
             double now = Time.realtimeSinceStartupAsDouble;
-            FloorPlane floor = floorSource != null && floorSource.HasFloor ? floorSource.CurrentPlane : default;
+            FloorPlane arFloor = floorSource != null && floorSource.HasFloor ? floorSource.CurrentPlane : default;
             _metric.Clear();
-            // Raw-depth samples are only the no-floor fallback (spec §6), so skip the work otherwise.
-            if (!floor.IsValid && depthSource != null)
+            // Without an ARCore floor, confident raw depth is both the derived floor's camera-height
+            // clue and the old per-frame fallback (≥ 200 samples). With one, neither is needed.
+            if (!arFloor.IsValid && depthSource != null)
                 MetricSampleCollector.Collect(depthSource.Latest, img, config.detection.metricMinConfidence, now,
                     config.depthMaxAgeSeconds, MetricStride, _metric);
+            FloorPlane floor = _floorResolver.Resolve(img, arFloor, _metric, now);
+            ActiveFloor = floor;
             Pipeline.ProcessFrame(SessionId, img, floor, _metric, now);
         }
 
@@ -192,6 +203,9 @@ namespace WallDistance.AR
             // from the old one would read as a jump in the new one.
             _poseGuard?.Reset();
             _continuity.Reset();
+            // A floor height from the old coordinate frame means nothing in the new one.
+            _floorResolver?.Reset();
+            ActiveFloor = default;
             if (floorSource != null) floorSource.ResetFloor();
         }
 
@@ -207,6 +221,8 @@ namespace WallDistance.AR
             {
                 Pipeline.Map.Clear();
                 _anchoring?.Clear();
+                // The floor's world height went with the old frame; the camera's height above it did not.
+                _floorResolver.MarkDiscontinuity();
             }
 
             if (candidateSource == null || arCamera == null)
@@ -256,7 +272,9 @@ namespace WallDistance.AR
                 // Assisted mode has no map: sides are NoWallOnSide there, and no ML reasons apply.
                 mapWalls = automatic ? Pipeline.Map.Tracks : null,
                 up = up,
-                detectionFailure = automatic ? Pipeline.DetectionFailure(now, InferenceAvailable) : FailureReason.None,
+                detectionFailure = automatic
+                    ? _floorResolver.Estimator.Explain(Pipeline.DetectionFailure(now, InferenceAvailable), now)
+                    : FailureReason.None,
             };
 
             Latest = Engine.Update(input);

@@ -154,8 +154,8 @@ namespace WallDistance.AR
             Append(pipe.Map.Tracks.Count);
             Append(Quote(s.aimed.sourceChain));
             Append(pipe.LastEdgeSnapFraction);
-            Append(service.floorSource != null && service.floorSource.HasFloor
-                ? service.floorSource.CurrentPlane.HeightAbove(s.aimed.cameraPose.position) : float.NaN);
+            // The floor that actually scaled the last frame, ARCore's or derived; NaN when none.
+            Append(service.ActiveFloor.IsValid ? service.ActiveFloor.HeightAbove(s.aimed.cameraPose.position) : float.NaN);
             Append(ThermalStatus.Current);
             Append(pipe.LastDetectLatencyMs);
             Append(sch != null ? sch.LastPrepareMs : double.NaN);
@@ -169,6 +169,15 @@ namespace WallDistance.AR
             Append(service.floorSource != null ? service.floorSource.Selector.Jumps : -1);
             Append(service.MapClears);
             Append(pipe.WallsCarved);
+
+            var fr = service.FloorResolver;
+            Append(fr != null && fr.LastSource == FloorSourceKind.ArPlane ? "ARPlane" : fr != null ? fr.LastSource.ToString() : "None");
+            Append(fr != null ? fr.Estimator.HeightMeters : float.NaN);
+            Append(fr != null ? fr.Estimator.SpreadMeters : float.NaN);
+            Append(fr != null ? fr.Estimator.WindowWeight : float.NaN);
+            Append(fr != null && fr.LastSelfAlignOk ? 1 : 0);
+            Append(fr != null ? fr.LastSelfAlignMs : double.NaN);
+            Append(fr != null ? fr.LastClueSamples : -1);
 
             AppendReading(s.left, true);
             AppendReading(s.right, true);

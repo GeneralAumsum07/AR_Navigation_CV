@@ -28,6 +28,10 @@ namespace WallDistance.Core
             // Wall-map integrity: clears on lost tracking or pose jumps (MapContinuityGuard) and
             // walls removed because the camera saw past them (FreeSpaceCarver).
             "map_clears", "walls_carved",
+            // Floor-free scale (2026-10-07): ARPlane / Derived / None, the pooled camera height,
+            // its spread and evidence weight, whether this frame self-aligned and how long that
+            // took, and how many confident raw-depth samples it could use.
+            "floor_source", "height_m", "height_spread_m", "height_weight", "selfalign_ok", "selfalign_ms", "clue_samples",
         };
 
         /// <summary>The per-reading set, the same shape as the existing aimed_/nearest_ columns.</summary>
