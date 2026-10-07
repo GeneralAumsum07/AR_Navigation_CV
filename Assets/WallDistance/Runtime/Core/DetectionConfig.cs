@@ -83,6 +83,13 @@ namespace WallDistance.Core
         public float associateMaxAngleDeg = 8f;
         public float associateMaxOffsetMeters = 0.15f;
         public float associateMaxGapMeters = 0.5f;
+        [Tooltip("For learned walls the offset gate grows to this fraction of the viewing range. Monocular "
+                 + "depth jitters with range (the 10-07 orange wall read 2.53-2.95 m frame to frame), so a fixed "
+                 + "15 cm gate stored one wall as dozens of copies.")]
+        public float associateOffsetFractionOfRange = 0.12f;
+        [Tooltip("Drop observations whose base line passes closer than this to the camera: a wall cannot run "
+                 + "through the person holding the phone. On 10-07 a bench seen end-on did, and read 0.04 m.")]
+        public float minLinePassMeters = 0.3f;
         public float trackMaxAgeSeconds = 30f;
         public float minOffsetSigmaMeters = 0.01f;
         public float minAngleSigmaDeg = 0.5f;
@@ -94,6 +101,25 @@ namespace WallDistance.Core
         [Tooltip("A source counts as current for a track if it observed it within this window.")]
         public float sourceWindowSeconds = 2f;
         public float arPlaneObserveIntervalSeconds = 0.1f;
+
+        [Header("See-through removal")]
+        [Tooltip("Pixel grid spacing for see-through rays in the 518² image (16 → ~1000 rays per wall).")]
+        public int carvePixelStride = 16;
+        [Tooltip("Only wall hits in this band above the floor count. Low hits are skipped: just behind a "
+                 + "wall's base the floor is barely farther than the wall, so they cannot tell.")]
+        public float carveMinHeightMeters = 0.5f;
+        public float carveMaxHeightMeters = 2.0f;
+        [Tooltip("Lower than wallMinDepthMeters on purpose: the phantom walls of 10-07 sat 0.1-0.3 m ahead.")]
+        public float carveMinDepthMeters = 0.1f;
+        [Tooltip("Seeing past the wall means measured depth > expected·(1 + fraction) + metres; within that "
+                 + "band either side the wall is confirmed. Wide, because learned depth jitters ~15%.")]
+        public float carveDepthFraction = 0.25f;
+        public float carveDepthMeters = 0.2f;
+        public int carveMinVisibleSamples = 6;
+        [Tooltip("Fraction of the visible samples that must see past the wall for the frame to count against it.")]
+        public float carveMinThroughRatio = 0.7f;
+        [Tooltip("Consecutive see-through frames before removal, so one bad depth frame deletes nothing.")]
+        public int carveFramesToRemove = 3;
 
         [Header("Staleness")]
         public float staleAfterSeconds = 1f;

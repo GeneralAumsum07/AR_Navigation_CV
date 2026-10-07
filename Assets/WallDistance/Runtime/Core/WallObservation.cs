@@ -23,6 +23,25 @@ namespace WallDistance.Core
         public bool calibratedFromRawDepth;
         public float edgeSnapFraction = float.NaN;
         public double timestamp;
+        /// <summary>
+        /// Camera position the wall was seen from. Learned depth error grows with range, so the map
+        /// widens its association gate with it. ARCore plane snapshots have no single viewer.
+        /// </summary>
+        public Vector3 viewer;
+        public bool hasViewer;
+
+        /// <summary>Horizontal distance from the viewer to the nearest point of the observed segment; NaN without a viewer.</summary>
+        public float ViewingRange
+        {
+            get
+            {
+                if (!hasViewer) return float.NaN;
+                Vector3 rel = viewer - origin;
+                rel -= up * Vector3.Dot(rel, up);
+                float along = Mathf.Clamp(Vector3.Dot(rel, direction), extentMin, extentMax);
+                return (rel - direction * along).magnitude;
+            }
+        }
 
         /// <summary>Along-wall unit vector; same convention as a candidate built with LookRotation(up, normal).</summary>
         public Vector3 direction => Vector3.Cross(normal, up);

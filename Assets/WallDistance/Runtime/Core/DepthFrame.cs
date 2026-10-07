@@ -52,19 +52,51 @@ namespace WallDistance.Core
         /// <summary>Provider image clock, in seconds. Its epoch is platform-specific.</summary>
         public double providerTimestamp = double.NaN;
 
+        // Fingerprint of the depth buffer as last stamped. Only meaningful while providerTimestamp
+        // is set: clearing that (a session reset) also forgets which content was already seen.
+        ulong _stampedContentHash;
+
         /// <summary>
         /// Stamp a newly observed provider image once. Re-acquiring the same image must not
         /// extend its lifetime or attach a later camera pose to old depth geometry.
         /// Arrival time is a conservative local freshness proxy, not an absolute sensor clock.
+        ///
+        /// "Same image" is judged by content as well as by timestamp: on the OnePlus 13R, ARCore
+        /// handed back one raw depth image for seconds at a time while stamping it with each new
+        /// camera frame's time, so a timestamp-only check took it as fresh and the distance froze.
+        /// Call this after copying the new pixels into <see cref="depthMillimeters"/>.
         /// </summary>
         public bool TryStamp(double sourceSeconds, double arrivalSeconds, Pose pose)
         {
             if (double.IsNaN(sourceSeconds) || double.IsInfinity(sourceSeconds) ||
                 (!double.IsNaN(providerTimestamp) && sourceSeconds <= providerTimestamp)) return false;
+            ulong hash = ContentHash(depthMillimeters, width * height);
+            // Real depth-from-motion output is noisy, so two genuinely new images are never
+            // bit-identical across thousands of pixels; identical content is a replay.
+            if (!double.IsNaN(providerTimestamp) && depthMillimeters != null && hash == _stampedContentHash) return false;
             providerTimestamp = sourceSeconds;
             timestamp = arrivalSeconds;
             cameraPose = pose;
+            _stampedContentHash = hash;
             return true;
+        }
+
+        /// <summary>
+        /// FNV-1a over the first <paramref name="count"/> samples. A full pass, not a sample: a
+        /// replay check that looked at a few pixels would call a mostly-static scene a replay.
+        /// ~14k samples for ARCore's 160x90 raw depth, well under a millisecond.
+        /// </summary>
+        static ulong ContentHash(ushort[] mm, int count)
+        {
+            if (mm == null) return 0;
+            ulong h = 14695981039346656037UL;
+            int n = Math.Min(count, mm.Length);
+            for (int i = 0; i < n; i++)
+            {
+                h = (h ^ (byte)mm[i]) * 1099511628211UL;
+                h = (h ^ (byte)(mm[i] >> 8)) * 1099511628211UL;
+            }
+            return h;
         }
 
         public bool IsUsable => width > 0 && height > 0 && depthMillimeters != null

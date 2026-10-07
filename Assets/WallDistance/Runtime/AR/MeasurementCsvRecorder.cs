@@ -48,10 +48,13 @@ namespace WallDistance.AR
 
         public void Toggle()
         {
-            if (IsRecording) Stop(); else Start();
+            if (IsRecording) Stop(); else StartRecording();
         }
 
-        public void Start()
+        // Not named Start: Unity calls any MonoBehaviour method named Start on launch, which
+        // used to begin a recording every time the app opened (and made the HUD's Record
+        // button stop it instead). RecorderLifecycleTests guards against the name returning.
+        public void StartRecording()
         {
             if (IsRecording) return;
             string dir = Path.Combine(Application.persistentDataPath, "WallDistanceLogs");
@@ -156,6 +159,16 @@ namespace WallDistance.AR
             Append(ThermalStatus.Current);
             Append(pipe.LastDetectLatencyMs);
             Append(sch != null ? sch.LastPrepareMs : double.NaN);
+            // Status strings are free text (the QNN description contains commas), so they are quoted.
+            // sched_status is overwritten with "running" on the next successful submit, so a
+            // refusal shows only in the rows sampled while it lasted; a run of such rows is the signal.
+            Append(Quote(sch != null ? sch.Status : "no scheduler"));
+            Append(Quote(service.InferenceStatus.Replace('\n', ' ')));
+            Append(pipe.FramesDropped);
+            Append(service.PoseJumps);
+            Append(service.floorSource != null ? service.floorSource.Selector.Jumps : -1);
+            Append(service.MapClears);
+            Append(pipe.WallsCarved);
 
             AppendReading(s.left, true);
             AppendReading(s.right, true);

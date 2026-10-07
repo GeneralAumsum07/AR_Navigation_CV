@@ -63,6 +63,12 @@ namespace WallDistance.AR
         public string InferenceStatus => scheduler != null && scheduler.Backend != null ? scheduler.Backend.Status : "no scheduler";
 
         WallMapAnchoring _anchoring;
+        PoseJumpGuard _poseGuard;
+        /// <summary>Camera pose jumps this session (see <see cref="PoseJumpGuard"/>); CSV diagnostic.</summary>
+        public int PoseJumps => _poseGuard != null ? _poseGuard.Jumps : 0;
+        readonly MapContinuityGuard _continuity = new MapContinuityGuard();
+        /// <summary>Wall-map clears caused by lost tracking or pose jumps this session; CSV diagnostic.</summary>
+        public int MapClears => _continuity.Clears;
         readonly List<MetricSample> _metric = new List<MetricSample>(4096);
         // Raw depth is ~160x90; every 2nd pixel gives up to ~3600 samples, well above the 200 minimum.
         const int MetricStride = 2;
@@ -94,12 +100,15 @@ namespace WallDistance.AR
             if (GetComponent<ARAnchorManager>() == null) gameObject.AddComponent<ARAnchorManager>();
             _anchoring = new WallMapAnchoring(transform);
             config.allowDenseDetection = true;
+            // Before NewSessionId, which resets it.
+            _poseGuard = new PoseJumpGuard(config);
             NewSessionId();
             Assisted = GetComponent<AssistedWallController>();
             if (Assisted == null) Assisted = gameObject.AddComponent<AssistedWallController>();
             // Learned-depth capture lives on the same XR Origin; created here so the scene needs no edits.
             if (floorSource == null) floorSource = GetComponent<FloorPlaneSource>();
             if (floorSource == null) floorSource = gameObject.AddComponent<FloorPlaneSource>();
+            floorSource.Selector = new FloorSelector(config);
             if (scheduler == null) scheduler = GetComponent<DepthInferenceScheduler>();
             if (scheduler == null) scheduler = gameObject.AddComponent<DepthInferenceScheduler>();
             scheduler.floorSource = floorSource;
@@ -161,6 +170,8 @@ namespace WallDistance.AR
             UpdateSessionState();
             if (img == null || img.sessionId != SessionId) return;
             if (State != WallDistanceSessionState.Tracking || Assisted.Active) return;
+            // Captured before tracking (re)started: posed in a frame the map no longer trusts.
+            if (!_continuity.Accepts(img.timestamp)) return;
             double now = Time.realtimeSinceStartupAsDouble;
             FloorPlane floor = floorSource != null && floorSource.HasFloor ? floorSource.CurrentPlane : default;
             _metric.Clear();
@@ -177,11 +188,26 @@ namespace WallDistance.AR
             Pipeline?.SetSession(SessionId);
             _anchoring?.Clear();
             if (scheduler != null) scheduler.SessionId = SessionId;
+            // A new session is a new coordinate frame: floor levels and the last camera position
+            // from the old one would read as a jump in the new one.
+            _poseGuard?.Reset();
+            _continuity.Reset();
+            if (floorSource != null) floorSource.ResetFloor();
         }
 
         void Update()
         {
+            // Observed before the state is derived, so a jump this frame already withholds this frame.
+            if (arCamera != null) _poseGuard.Observe(arCamera.transform.position, Time.realtimeSinceStartupAsDouble);
             UpdateSessionState();
+            // Losing tracking (or a pose jump, which UpdateSessionState reports as lost) leaves the
+            // mapped walls in a frame the returning camera may not share. Rebuilding takes about a
+            // second at ~10 inferences/s; a misplaced wall otherwise lingers for up to 30 s.
+            if (_continuity.Update(State == WallDistanceSessionState.Tracking, Time.realtimeSinceStartupAsDouble))
+            {
+                Pipeline.Map.Clear();
+                _anchoring?.Clear();
+            }
 
             if (candidateSource == null || arCamera == null)
             {
@@ -285,6 +311,15 @@ namespace WallDistance.AR
                     State = WallDistanceSessionState.TrackingLost;
                     StateDetail = DescribeNotTracking(ARSession.notTrackingReason);
                     break;
+            }
+            // ARCore can say "Tracking" while its pose leaps metres in a frame. Treating that as
+            // lost tracking reuses the existing safe path: readings invalid, filters cleared, and
+            // no inference frame or AR plane enters the wall map with a pose from the wrong frame.
+            if (State == WallDistanceSessionState.Tracking && _poseGuard != null
+                && !_poseGuard.IsReliable(Time.realtimeSinceStartupAsDouble))
+            {
+                State = WallDistanceSessionState.TrackingLost;
+                StateDetail = "Position jumped: tracking unreliable. Move slowly.";
             }
         }
 

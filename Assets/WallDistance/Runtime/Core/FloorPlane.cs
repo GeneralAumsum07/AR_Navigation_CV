@@ -9,8 +9,14 @@ namespace WallDistance.Core
     /// </summary>
     public readonly struct FloorPlane
     {
-        /// <summary>Camera heights outside this band mean the "floor" is a table, a shelf or a mis-tracked plane.</summary>
-        public const float MinCameraHeight = 0.4f, MaxCameraHeight = 2.5f;
+        /// <summary>
+        /// Camera heights outside this band mean the "floor" is a table, a shelf or a mis-tracked
+        /// plane. It is the band for a phone held by a standing or walking person. It was
+        /// 0.4-2.5 m, wide enough to accept a plane that left the camera ~0.5 m above it, which
+        /// was not the floor and shrank every learned distance (10-07 corridor log).
+        /// The 0.8 m floor excludes very low hand positions; revisit it for seated users.
+        /// </summary>
+        public const float MinCameraHeight = 0.8f, MaxCameraHeight = 2.2f;
 
         public readonly Vector3 point;
         /// <summary>Unit normal pointing away from the floor (gravity up). Zero for an invalid plane.</summary>

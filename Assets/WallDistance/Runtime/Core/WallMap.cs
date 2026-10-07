@@ -39,21 +39,75 @@ namespace WallDistance.Core
         public WallTrack Observe(WallObservation obs, double now)
         {
             if (obs == null) return null;
+            float gate = OffsetGate(obs);
+            _matches.Clear();
             WallTrack best = null;
             float bestOffset = float.PositiveInfinity;
             foreach (var t in _tracks)
             {
                 if (Vector3.Angle(t.normal, obs.normal) > D.associateMaxAngleDeg) continue;
                 float off = Mathf.Abs(t.SignedDistance(obs.origin));
-                if (off > D.associateMaxOffsetMeters) continue;
+                if (off > gate) continue;
                 if (AlongGap(t, obs) > D.associateMaxGapMeters) continue;
-                if (off < bestOffset) { bestOffset = off; best = t; }
+                _matches.Add(t);
+                // The most-observed copy wins, not the nearest: its geometry is the best averaged,
+                // and keeping it keeps its id, so the measurement filter and ARAnchor carry on.
+                if (best == null || t.observations > best.observations
+                    || (t.observations == best.observations && off < bestOffset)) { bestOffset = off; best = t; }
             }
             if (best == null) best = Create(obs, now);
             else Fuse(best, obs);
             Record(best, obs, now);
+            // One observation matching several tracks means they are copies of one wall, made
+            // while noise exceeded the gate. Fold them into the survivor.
+            for (int i = 0; i < _matches.Count; i++)
+                if (_matches[i] != best) Absorb(best, _matches[i]);
             return best;
         }
+
+        readonly List<WallTrack> _matches = new List<WallTrack>(4);
+
+        /// <summary>
+        /// Association offset gate. Learned observations widen it with viewing range, because
+        /// monocular depth error is proportional to range; plane snapshots keep the fixed gate.
+        /// </summary>
+        float OffsetGate(WallObservation obs)
+        {
+            float range = obs.ViewingRange;
+            return float.IsNaN(range)
+                ? D.associateMaxOffsetMeters
+                : Mathf.Max(D.associateMaxOffsetMeters, D.associateOffsetFractionOfRange * range);
+        }
+
+        /// <summary>Merge a duplicate into the survivor: union extent, sum evidence, then drop it.</summary>
+        void Absorb(WallTrack keep, WallTrack gone)
+        {
+            UnionExtent(keep, gone.PointAt(gone.extentMin), gone.PointAt(gone.extentMax));
+            float keepLevel = Vector3.Dot(keep.origin, keep.up), goneLevel = Vector3.Dot(gone.origin, keep.up);
+            if (goneLevel < keepLevel) keep.origin += keep.up * (goneLevel - keepLevel);
+            keep.observations += gone.observations;
+            keep.firstSeen = System.Math.Min(keep.firstSeen, gone.firstSeen);
+            keep.lastSeen = System.Math.Max(keep.lastSeen, gone.lastSeen);
+            // Keep each source's most recent sighting, so cross-checks and source labels see the
+            // merged evidence. Points are not re-projected: both lie on (nearly) the same line.
+            if (Later(gone.lastFloorEdgeTime, keep.lastFloorEdgeTime)) keep.lastFloorEdgeTime = gone.lastFloorEdgeTime;
+            if (Later(gone.lastLearnedTime, keep.lastLearnedTime))
+            {
+                keep.lastLearnedTime = gone.lastLearnedTime;
+                keep.lastLearnedPoint = gone.lastLearnedPoint;
+            }
+            if (Later(gone.lastArPlaneTime, keep.lastArPlaneTime))
+            {
+                keep.lastArPlaneTime = gone.lastArPlaneTime;
+                keep.lastArPlanePoint = gone.lastArPlanePoint;
+            }
+            _tracks.Remove(gone);
+        }
+
+        static bool Later(double a, double b) => !double.IsNaN(a) && (double.IsNaN(b) || a > b);
+
+        /// <summary>Remove one track (see-through evidence). Its anchor goes at the next anchoring sync.</summary>
+        public bool Remove(WallTrack t) => _tracks.Remove(t);
 
         WallTrack Create(WallObservation obs, double now)
         {
@@ -112,10 +166,15 @@ namespace WallDistance.Core
             float trackLevel = Vector3.Dot(t.origin, t.up), obsLevel = Vector3.Dot(obs.origin, t.up);
             if (obsLevel < trackLevel) t.origin += t.up * (obsLevel - trackLevel);
 
-            // Extent: union, then re-centre the origin on it.
+            UnionExtent(t, obs.PointAt(obs.extentMin), obs.PointAt(obs.extentMax));
+        }
+
+        /// <summary>Extent: union with the segment p0-p1 (projected on the track), then re-centre the origin on it.</summary>
+        static void UnionExtent(WallTrack t, Vector3 p0, Vector3 p1)
+        {
             Vector3 dir = t.direction;
-            float a0 = Vector3.Dot(obs.PointAt(obs.extentMin) - t.origin, dir);
-            float a1 = Vector3.Dot(obs.PointAt(obs.extentMax) - t.origin, dir);
+            float a0 = Vector3.Dot(p0 - t.origin, dir);
+            float a1 = Vector3.Dot(p1 - t.origin, dir);
             float lo = Mathf.Min(t.extentMin, Mathf.Min(a0, a1)), hi = Mathf.Max(t.extentMax, Mathf.Max(a0, a1));
             float mid = 0.5f * (lo + hi);
             t.origin += dir * mid;

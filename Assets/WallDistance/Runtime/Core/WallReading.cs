@@ -245,5 +245,22 @@ namespace WallDistance.Core
         [Tooltip("Two sources agreeing within this distance earn CrossChecked.")]
         public float crossCheckToleranceMeters = 0.05f;
         public DetectionConfig detection = new DetectionConfig();
+
+        // ARCore can report "Tracking" while its pose is wrong. These guards come from the
+        // 2026-10-07 OnePlus 13R logs and are tuned on them: with these values a clean session
+        // from 2026-09-16 is never flagged, and the corridor walk is flagged 15% of the time.
+        [Header("Tracking sanity")]
+        [Tooltip("A camera step at least this long (metres) in one update can be a pose jump...")]
+        public float poseJumpMinStepMeters = 0.25f;
+        [Tooltip("...when it is also faster than this (m/s). Both are needed: a wrist flick is fast but short.")]
+        public float poseJumpMinSpeedMetersPerSecond = 3f;
+        [Tooltip("Readings are withheld for this long (seconds) after a pose jump.")]
+        public float poseJumpHoldSeconds = 0.5f;
+        [Tooltip("A change in camera height above the floor larger than this (metres) within one update means the floor estimate jumped.")]
+        public float floorMaxHeightStepMeters = 0.25f;
+        [Tooltip("After a floor jump, the new floor level must hold this long (seconds) before it fixes the ML scale again.")]
+        public float floorSettleSeconds = 0.5f;
+        [Tooltip("Horizontal planes within this height (metres) of the lowest one are the same floor level.")]
+        public float floorSameLevelMeters = 0.15f;
     }
 }

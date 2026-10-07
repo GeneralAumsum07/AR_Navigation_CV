@@ -20,16 +20,22 @@ namespace WallDistance.Tests
         public void AppendedColumns_SpecSection7ThenSidesThenWidth()
         {
             var cols = CsvSchema.AppendedColumns();
-            Assert.AreEqual(13 + 10 + 10 + 1, cols.Length);
+            Assert.AreEqual(20 + 10 + 10 + 1, cols.Length);
             CollectionAssert.AreEqual(new[]
             {
                 "infer_ms", "infer_hz", "align_s", "align_t", "align_residual", "floor_inliers",
                 "walls_in_map", "aimed_source_chain", "edge_snap_frac", "floor_h_m", "thermal_state", "detect_latency_ms",
                 "prep_ms",
+                // Field-debugging diagnostics: where a frame silently stopped (scheduler, backend, pipeline).
+                "sched_status", "infer_status", "frames_dropped",
+                // Tracking sanity: how often ARCore's pose or floor jumped.
+                "pose_jumps", "floor_jumps",
+                // Map integrity: clears on lost tracking, walls removed because the camera saw through them.
+                "map_clears", "walls_carved",
             }, CsvSchema.LearnedColumns);
-            Assert.AreEqual("left_valid", cols[13]);
-            Assert.AreEqual("right_reason", cols[32]);
-            Assert.AreEqual("corridor_width_m", cols[33]);
+            Assert.AreEqual("left_valid", cols[20]);
+            Assert.AreEqual("right_reason", cols[39]);
+            Assert.AreEqual("corridor_width_m", cols[40]);
             Assert.AreEqual("floor-aligned-v1", CsvSchema.Revision);
         }
     }

@@ -26,6 +26,9 @@ namespace WallDistance.Core
         public bool calibratedFromRawDepth;
         public float edgeSnapFraction = float.NaN;
 
+        /// <summary>Consecutive frames in which the camera saw past this wall (FreeSpaceCarver).</summary>
+        public int SeeThroughFrames { get; internal set; }
+
         internal bool hasAnchorReference;
         internal Pose anchorReference;
 

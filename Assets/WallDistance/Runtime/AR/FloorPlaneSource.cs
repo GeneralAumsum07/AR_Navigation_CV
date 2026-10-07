@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
@@ -6,18 +7,21 @@ using WallDistance.Core;
 namespace WallDistance.AR
 {
     /// <summary>
-    /// Chooses THE floor: the largest tracked upward-facing plane whose height below the camera is
-    /// plausible (same bounds as assisted mode). Sticky: once chosen, a floor is kept while it
-    /// stays valid, so the depth scale does not jump between two similar planes.
+    /// Feeds ARCore's upward-facing planes to <see cref="FloorSelector"/>, which picks the lowest
+    /// plausible level and withholds the floor while it jumps. Selection logic lives in Core so
+    /// it is tested without a device; this adapter only translates ARPlanes.
     /// </summary>
     public sealed class FloorPlaneSource : MonoBehaviour
     {
         public ARPlaneManager planeManager;
         public Camera arCamera;
 
-        public ARPlane Current { get; private set; }
-        public FloorPlane CurrentPlane { get; private set; }
+        // Replaced by the service so the selector uses the same (serialized) config as everything else.
+        public FloorSelector Selector { get; set; } = new FloorSelector(new MeasurementConfig());
+        public FloorPlane CurrentPlane => Selector.Current;
         public bool HasFloor => CurrentPlane.IsValid;
+
+        readonly List<FloorCandidate> _candidates = new List<FloorCandidate>(8);
 
         void Awake()
         {
@@ -32,32 +36,23 @@ namespace WallDistance.AR
         /// <summary>Call once per frame before anything reads CurrentPlane.</summary>
         public void Refresh()
         {
-            if (planeManager == null || arCamera == null) { Clear(); return; }
-            Vector3 cam = arCamera.transform.position;
-            if (Current != null && IsUsable(Current, cam))
+            _candidates.Clear();
+            if (planeManager != null && arCamera != null)
             {
-                // Re-read every frame: ARCore refines plane height as it sees more floor.
-                CurrentPlane = ToFloor(Current);
-                return;
+                foreach (var p in planeManager.trackables)
+                {
+                    // Re-read every frame: ARCore refines plane height as it sees more floor, and
+                    // the selector judges whether that refinement is plausible.
+                    if (p.trackingState != TrackingState.Tracking || p.subsumedBy != null
+                        || p.alignment != PlaneAlignment.HorizontalUp) continue;
+                    _candidates.Add(new FloorCandidate(p.trackableId.ToString(), p.center, p.normal, p.size.x * p.size.y));
+                }
             }
-            ARPlane best = null;
-            float bestArea = 0f;
-            foreach (var p in planeManager.trackables)
-            {
-                if (!IsUsable(p, cam)) continue;
-                float area = p.size.x * p.size.y;
-                if (area > bestArea) { bestArea = area; best = p; }
-            }
-            Current = best;
-            CurrentPlane = best != null ? ToFloor(best) : default;
+            Vector3 cam = arCamera != null ? arCamera.transform.position : Vector3.zero;
+            Selector.Update(_candidates, cam, Time.realtimeSinceStartupAsDouble);
         }
 
-        void Clear() { Current = null; CurrentPlane = default; }
-
-        static FloorPlane ToFloor(ARPlane p) => new FloorPlane(p.center, p.normal);
-
-        static bool IsUsable(ARPlane p, Vector3 cam) =>
-            p != null && p.trackingState == TrackingState.Tracking && p.subsumedBy == null
-            && p.alignment == PlaneAlignment.HorizontalUp && ToFloor(p).PlausibleCameraHeight(cam);
+        /// <summary>A new AR session is a new coordinate frame: old floor levels mean nothing in it.</summary>
+        public void ResetFloor() => Selector.Reset();
     }
 }

@@ -51,7 +51,10 @@ namespace WallDistance.Core
                     var w = walls[i];
                     if (now - w.lastSeen > cfg.sideMaxAgeSeconds) continue;
                     float signed = w.SignedDistance(camera.position);
-                    float dist = Mathf.Abs(signed);
+                    // Distance to the wall itself, not its extended line. Inside the extent they are
+                    // equal; within the margin past an end, the line can pass right by the phone while
+                    // the wall is a metre away (10-07: an end-on bench read 0.04 m).
+                    float dist = SegmentDistance(w, camera.position, out _);
                     if (dist > cfg.sideMaxDistanceMeters || dist < 1e-4f) continue;
                     // Normal pointing at the camera; -toward points from the camera to the wall.
                     Vector3 toward = signed >= 0f ? w.normal : -w.normal;
@@ -90,7 +93,7 @@ namespace WallDistance.Core
             // The filter resets itself when the wall id changes, so two walls are never blended.
             float filtered = filter.Update(sessionId, w.id, dist, now, cfg.filterTimeConstantSeconds);
             var source = w.Source(now, cfg.detection.sourceWindowSeconds);
-            Vector3 foot = camera.position - toward * dist;
+            SegmentDistance(w, camera.position, out Vector3 foot);
             var r = new WallReading
             {
                 isValid = true,
@@ -123,6 +126,21 @@ namespace WallDistance.Core
                     r.distanceMeters, cfg.minTestedRangeMeters, cfg.maxTestedRangeMeters, r.qualityReason);
             }
             return r;
+        }
+
+        /// <summary>
+        /// Horizontal distance from <paramref name="p"/> to the wall's base segment, and the nearest
+        /// point on it lifted to p's height (the "foot", as the perpendicular case always had).
+        /// </summary>
+        static float SegmentDistance(WallTrack w, Vector3 p, out Vector3 foot)
+        {
+            Vector3 rel = p - w.origin;
+            float height = Vector3.Dot(rel, w.up);
+            rel -= w.up * height;
+            float along = Mathf.Clamp(Vector3.Dot(rel, w.direction), w.extentMin, w.extentMax);
+            Vector3 nearest = w.direction * along;
+            foot = w.origin + nearest + w.up * height;
+            return (rel - nearest).magnitude;
         }
 
         static bool InView(Vector3 p, Matrix4x4 worldToClip)
