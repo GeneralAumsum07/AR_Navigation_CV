@@ -68,7 +68,11 @@ namespace WallDistance.Tests
         {
             var resolver = new FloorResolver(new DetectionConfig());
             var img = SyntheticCorridor.ToNetworkOutput(new SyntheticCorridor().Render(SyntheticCorridor.Camera()));
-            for (int k = 0; k <= 20; k++) resolver.Resolve(img, SyntheticCorridor.Floor, null, k * 0.1);
+            for (int k = 0; k <= 20; k++)
+            {
+                img.timestamp = k * 0.1;
+                resolver.Resolve(img, SyntheticCorridor.Floor, null, img.timestamp);
+            }
             resolver.MarkDiscontinuity();
             Assert.AreEqual(0, resolver.Estimator.WindowClues);
         }
@@ -78,10 +82,60 @@ namespace WallDistance.Tests
         {
             var resolver = new FloorResolver(new DetectionConfig());
             var img = SyntheticCorridor.ToNetworkOutput(new SyntheticCorridor().Render(SyntheticCorridor.Camera()));
-            for (int k = 0; k <= 20; k++) resolver.Resolve(img, SyntheticCorridor.Floor, null, k * 0.1);
+            for (int k = 0; k <= 20; k++)
+            {
+                img.timestamp = k * 0.1;
+                resolver.Resolve(img, SyntheticCorridor.Floor, null, img.timestamp);
+            }
             resolver.Reset();
             Assert.AreEqual(FloorSourceKind.None, resolver.LastSource);
             Assert.AreEqual(0, resolver.Estimator.WindowClues);
+        }
+
+        static InverseDepthImage SmallFrame(double timestamp) => new InverseDepthImage(1, 1)
+        {
+            timestamp = timestamp,
+            sessionId = "s1",
+            cameraPose = new Pose(new Vector3(0, 1.4f, 0), Quaternion.identity),
+        };
+
+        static FloorResolver WarmResolver()
+        {
+            var resolver = new FloorResolver(new DetectionConfig());
+            for (int k = 0; k <= 4; k++)
+            {
+                double t = k * 0.5;
+                resolver.Resolve(SmallFrame(t), SyntheticCorridor.Floor, null, t);
+            }
+            Assert.IsTrue(resolver.Estimator.Ready);
+            return resolver;
+        }
+
+        [TestCase(0.0)]
+        [TestCase(4.0)]
+        [TestCase(double.NaN)]
+        [TestCase(double.PositiveInfinity)]
+        public void RejectedCaptureTime_DoesNotUpdateCalibration(double captureTime)
+        {
+            var resolver = WarmResolver();
+            var differentFloor = new FloorPlane(new Vector3(0, 0.4f, 0), Vector3.up);
+            var result = resolver.Resolve(SmallFrame(captureTime), differentFloor, null, 3.0);
+            Assert.IsFalse(result.IsValid, "old/future/nonfinite captures cannot supply fresh metric evidence");
+            Assert.AreEqual(5, resolver.Estimator.WindowClues);
+            Assert.AreEqual(1000f, resolver.Estimator.WindowWeight);
+            Assert.AreEqual(1.4f, resolver.Estimator.HeightMeters, 1e-5f);
+            Assert.AreEqual(FloorSourceKind.ArPlane, resolver.LastSource, "rejection preserves last accepted diagnostics");
+        }
+
+        [Test]
+        public void FreshArFloor_WarmsDerivedFloorWhenPlaneDisappears()
+        {
+            var resolver = WarmResolver();
+            // No floor pixels are needed to use an already calibrated hold when a plane flickers.
+            var floor = resolver.Resolve(SmallFrame(2.1), default, null, 2.1);
+            Assert.IsTrue(floor.IsValid);
+            Assert.AreEqual(1.4f, floor.HeightAbove(new Vector3(0, 1.4f, 0)), 1e-5f);
+            Assert.AreEqual(FloorSourceKind.Derived, resolver.LastSource);
         }
     }
 }

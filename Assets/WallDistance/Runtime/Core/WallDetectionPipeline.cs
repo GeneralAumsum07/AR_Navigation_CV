@@ -64,9 +64,7 @@ namespace WallDistance.Core
             // A worker may finish after reset or long after capture. Neither result is fresh
             // geometry in this frame. Null session stamps remain supported for offline replays.
             if (img == null) return;
-            if ((!string.IsNullOrEmpty(img.sessionId) && img.sessionId != sessionId)
-                || double.IsNaN(img.timestamp) || now < img.timestamp
-                || now - img.timestamp > _cfg.detection.staleAfterSeconds)
+            if (!img.IsCurrent(sessionId, now, _cfg.detection.staleAfterSeconds))
             {
                 // A null image is a caller bug, not a discarded result, so only these are counted.
                 FramesDropped++;

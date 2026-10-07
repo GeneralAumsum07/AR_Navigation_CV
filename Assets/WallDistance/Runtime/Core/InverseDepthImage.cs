@@ -37,6 +37,17 @@ namespace WallDistance.Core
         }
 
         public bool InContent(int u, int v) => content.Contains(new Vector2Int(u, v));
+
+        /// <summary>
+        /// Shared capture gate for calibration and detection. Processing an old network result
+        /// must not turn its old metric evidence into a fresh height clue before detection drops
+        /// it. Null session stamps are supported for offline replay, as in the original pipeline.
+        /// </summary>
+        public bool IsCurrent(string currentSessionId, double now, double maxAgeSeconds) =>
+            (string.IsNullOrEmpty(sessionId) || sessionId == currentSessionId)
+            && !double.IsNaN(timestamp) && !double.IsInfinity(timestamp)
+            && !double.IsNaN(now) && !double.IsInfinity(now)
+            && now >= timestamp && now - timestamp <= maxAgeSeconds;
         /// <summary>
         /// NaN every value outside <see cref="content"/>. The network also "sees" the black letterbox
         /// bars and returns plausible-looking depth there; NaN makes any consumer that forgets the

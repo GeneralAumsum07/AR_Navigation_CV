@@ -14,6 +14,7 @@ namespace WallDistance.Core
     /// </summary>
     public sealed class FloorResolver
     {
+        readonly DetectionConfig _cfg;
         readonly FloorSelfAligner _aligner;
         readonly HeightClues _clues;
 
@@ -26,13 +27,17 @@ namespace WallDistance.Core
 
         public FloorResolver(DetectionConfig cfg)
         {
-            _aligner = new FloorSelfAligner(cfg);
-            _clues = new HeightClues(cfg);
-            Estimator = new CameraHeightEstimator(cfg);
+            _cfg = cfg ?? new DetectionConfig();
+            _aligner = new FloorSelfAligner(_cfg);
+            _clues = new HeightClues(_cfg);
+            Estimator = new CameraHeightEstimator(_cfg);
         }
 
         public FloorPlane Resolve(InverseDepthImage img, FloorPlane arFloor, IReadOnlyList<MetricSample> samples, double now)
         {
+            // Match the pipeline's capture-age rules before changing any calibration state or
+            // diagnostics. Stale/future frames supply no fresh evidence, even with an AR floor.
+            if (img == null || !img.IsCurrent(img.sessionId, now, _cfg.staleAfterSeconds)) return default;
             LastSelfAlignOk = false;
             LastSelfAlignMs = double.NaN;
             LastClueSamples = -1;

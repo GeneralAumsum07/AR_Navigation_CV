@@ -181,6 +181,13 @@ namespace WallDistance.AR
             // Captured before tracking (re)started: posed in a frame the map no longer trusts.
             if (!_continuity.Accepts(img.timestamp)) return;
             double now = Time.realtimeSinceStartupAsDouble;
+            if (!img.IsCurrent(SessionId, now, config.detection.staleAfterSeconds))
+            {
+                // Keep the pipeline's dropped-frame counter, but never collect clues or replace
+                // ActiveFloor from a capture whose geometry the pipeline will refuse.
+                Pipeline.ProcessFrame(SessionId, img, default, null, now);
+                return;
+            }
             FloorPlane arFloor = floorSource != null && floorSource.HasFloor ? floorSource.CurrentPlane : default;
             _metric.Clear();
             // Without an ARCore floor, confident raw depth is both the derived floor's camera-height
