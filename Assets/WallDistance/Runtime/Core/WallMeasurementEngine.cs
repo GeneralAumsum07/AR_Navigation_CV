@@ -128,7 +128,8 @@ namespace WallDistance.Core
         static void Substitute(ref WallReading r, FailureReason detection)
         {
             if (r.isValid) return;
-            if (detection != FailureReason.NoFloor && detection != FailureReason.AlignmentFailed && detection != FailureReason.InferenceStale) return;
+            if (detection != FailureReason.NoFloor && detection != FailureReason.AlignmentFailed
+                && detection != FailureReason.InferenceStale && detection != FailureReason.Calibrating) return;
             if (r.failure != FailureReason.NoWallUnderCrosshair && r.failure != FailureReason.NoWallInView && r.failure != FailureReason.NoWallOnSide) return;
             r.failure = detection;
             r.qualityReason = detection.ToString();

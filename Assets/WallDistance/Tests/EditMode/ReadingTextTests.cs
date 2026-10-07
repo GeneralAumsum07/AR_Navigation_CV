@@ -32,6 +32,7 @@ namespace WallDistance.Tests
             Assert.AreEqual("wall lost", ReadingText.Failure(FailureReason.CandidateLost));
             Assert.AreEqual("AR not tracking", ReadingText.Failure(FailureReason.SessionNotTracking));
             Assert.AreEqual("point at the floor for a moment", ReadingText.Failure(FailureReason.NoFloor));
+            Assert.AreEqual("calibrating — keep walking", ReadingText.Failure(FailureReason.Calibrating));
             Assert.AreEqual("show more floor", ReadingText.Failure(FailureReason.AlignmentFailed));
             Assert.AreEqual("ML depth unavailable", ReadingText.Failure(FailureReason.InferenceUnavailable));
             Assert.AreEqual("detecting…", ReadingText.Failure(FailureReason.InferenceStale));

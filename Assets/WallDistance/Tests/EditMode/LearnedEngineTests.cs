@@ -159,5 +159,15 @@ namespace WallDistance.Tests
             Assert.AreEqual(MeasurementSource.PlaneOnly, s.aimed.source);
             Assert.AreEqual("PlaneOnly", s.aimed.sourceChain);
         }
+        [Test]
+        public void Calibrating_ReplacesGenericNoWallReasons()
+        {
+            var e = new WallMeasurementEngine(new MeasurementConfig());
+            var s = e.Update(In(new WallCandidate[0], 1.0, new List<WallTrack>(), detection: FailureReason.Calibrating));
+            Assert.AreEqual(FailureReason.Calibrating, s.aimed.failure);
+            Assert.AreEqual(FailureReason.Calibrating, s.nearest.failure);
+            Assert.AreEqual(FailureReason.Calibrating, s.left.failure);
+            Assert.AreEqual(FailureReason.Calibrating, s.right.failure);
+        }
     }
 }

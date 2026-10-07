@@ -38,6 +38,7 @@ namespace WallDistance.Core
                 case FailureReason.CandidateLost: return "wall lost";
                 case FailureReason.SessionNotTracking: return "AR not tracking";
                 case FailureReason.NoFloor: return "point at the floor for a moment";
+                case FailureReason.Calibrating: return "calibrating — keep walking";
                 case FailureReason.AlignmentFailed: return "show more floor";
                 case FailureReason.InferenceUnavailable: return "ML depth unavailable";
                 case FailureReason.InferenceStale: return "detecting…";
