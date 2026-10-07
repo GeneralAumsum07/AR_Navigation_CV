@@ -95,6 +95,12 @@ namespace WallDistance.Core
         NoHeading,
         /// <summary>No map wall qualifies on this side (spec §5.5).</summary>
         NoWallOnSide,
+        /// <summary>
+        /// No ARCore floor, and the camera height is still being learned from sparse depth clues
+        /// (floor-free design §4.3). Distinct from NoFloor because the user's action differs:
+        /// keep walking, not "point at the floor".
+        /// </summary>
+        Calibrating,
     }
 
     /// <summary>

@@ -34,6 +34,7 @@ namespace WallDistance.Tests
             Assert.AreEqual(9, (int)FailureReason.InferenceStale);
             Assert.AreEqual(10, (int)FailureReason.NoHeading);
             Assert.AreEqual(11, (int)FailureReason.NoWallOnSide);
+            Assert.AreEqual(12, (int)FailureReason.Calibrating);
         }
 
         [Test]
