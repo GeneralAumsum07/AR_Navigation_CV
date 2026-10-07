@@ -121,6 +121,39 @@ namespace WallDistance.Core
         [Tooltip("Consecutive see-through frames before removal, so one bad depth frame deletes nothing.")]
         public int carveFramesToRemove = 3;
 
+        [Header("Floor-free scale (2026-10-07 floor-free design)")]
+        [Tooltip("Pixel stride when collecting downward-looking pixels for the flatness search.")]
+        public int selfAlignStride = 4;
+        [Tooltip("Rays closer to horizontal than this cannot reach the floor nearby; they only add far, noisy points.")]
+        public float selfAlignMinDescentDeg = 3f;
+        [Tooltip("A pixel is on the floor when its height is within this fraction of the camera height. Relative, so "
+                 + "the score does not depend on the network's unknown scale.")]
+        public float selfAlignHeightTolerance = 0.03f;
+        public int selfAlignMinInliers = 500;
+        [Tooltip("The floor must be seen over at least this far/near depth ratio. A floor seen over a narrow band "
+                 + "(close-up of a wall) is flat for many shifts, so the shift is not identifiable.")]
+        public float selfAlignMinDepthRatio = 2f;
+        public int selfAlignCoarseSteps = 64;
+        public int selfAlignFineSteps = 21;
+        [Tooltip("Confident raw-depth samples needed for one camera-height clue. Run 150956 had a median of 35 per frame.")]
+        public int minClueSamples = 10;
+        [Tooltip("Cap on one frame's weight, so one sample-rich frame cannot outvote seconds of others.")]
+        public int maxClueWeight = 200;
+        [Tooltip("A frame's samples must agree: median absolute deviation / median height at most this.")]
+        public float maxClueSpread = 0.15f;
+        [Tooltip("Weight of an ARCore floor clue; equal to the strongest raw-depth clue.")]
+        public float heightPlaneWeight = 200f;
+        [Tooltip("Clues older than this are dropped. Short, because ARCore's vertical position drifts.")]
+        public float heightWindowSeconds = 5f;
+        public float minHeightWeight = 100f;
+        public int minHeightClues = 5;
+        [Tooltip("Clues must span this long before the first estimate is trusted: one moment's view can be biased.")]
+        public float minHeightSpanSeconds = 2f;
+        [Tooltip("Half of the ~14 cm that 10% of a 1.4 m camera height allows (Rachit's 10% target).")]
+        public float maxHeightSpreadMeters = 0.07f;
+        [Tooltip("How long a good estimate is kept while too few new clues arrive.")]
+        public float heightHoldSeconds = 20f;
+
         [Header("Staleness")]
         public float staleAfterSeconds = 1f;
     }
