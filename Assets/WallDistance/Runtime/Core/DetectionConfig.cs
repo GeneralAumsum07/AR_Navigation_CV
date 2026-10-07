@@ -141,6 +141,9 @@ namespace WallDistance.Core
         public int maxClueWeight = 200;
         [Tooltip("A frame's samples must agree: median absolute deviation / median height at most this.")]
         public float maxClueSpread = 0.15f;
+        [Tooltip("Fraction of height votes within the spread band of the median. MAD alone accepts two "
+                 + "competing surfaces whenever either one has a tiny majority; require a clear consensus.")]
+        public float minClueAgreementFraction = 0.7f;
         [Tooltip("Weight of an ARCore floor clue; equal to the strongest raw-depth clue.")]
         public float heightPlaneWeight = 200f;
         [Tooltip("Clues older than this are dropped. Short, because ARCore's vertical position drifts.")]

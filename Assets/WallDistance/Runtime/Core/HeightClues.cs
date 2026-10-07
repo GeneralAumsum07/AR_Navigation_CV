@@ -79,11 +79,21 @@ namespace WallDistance.Core
             if (n < _cfg.minClueSamples) return false;
 
             float median = Selection.Kth(_h, n, n / 2);
-            for (int i = 0; i < n; i++) _h[i] = Mathf.Abs(_h[i] - median);
+            int agreeing = 0;
+            float band = _cfg.maxClueSpread * median;
+            for (int i = 0; i < n; i++)
+            {
+                _h[i] = Mathf.Abs(_h[i] - median);
+                if (_h[i] <= band) agreeing++;
+            }
             float mad = Selection.Kth(_h, n, n / 2);
             // Samples that disagree (reflections, depth edges) make the median a coin toss
             // between surfaces; better no clue than a confident wrong one.
             if (!(median > 0f) || mad > _cfg.maxClueSpread * median) return false;
+            // With a 19/21 split between two consistent surfaces MAD is near zero whichever
+            // mode wins, even if that mode implies a 50% scale error. Require at least 70%
+            // agreement by default, while still tolerating a small minority of bad returns.
+            if (agreeing < Mathf.CeilToInt(n * _cfg.minClueAgreementFraction)) return false;
             if (median < FloorPlane.MinCameraHeight || median > FloorPlane.MaxCameraHeight) return false;
 
             float cameraY = img.cameraPose.position.y;

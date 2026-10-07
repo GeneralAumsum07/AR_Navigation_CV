@@ -57,6 +57,31 @@ namespace WallDistance.Tests
             Assert.IsFalse(new HeightClues(new DetectionConfig()).TryFromDepth(r.image, a, samples, 1.0, out _, out _));
         }
 
+        [TestCase(19, 21, false)]
+        [TestCase(21, 19, false)]
+        [TestCase(32, 8, true)]
+        public void CompetingSurfaces_NeedClearAgreement(int correct, int reflected, bool accepted)
+        {
+            // Two surfaces can each be internally consistent. A one-pixel majority must not
+            // make a 50% scale error look certain; an 80% consensus can tolerate sparse outliers.
+            var img = new InverseDepthImage(correct + reflected, 1)
+            {
+                content = new RectInt(0, 0, correct + reflected, 1),
+                cameraPose = new Pose(new Vector3(0, 1.4f, 0), Quaternion.identity),
+            };
+            var samples = new List<MetricSample>();
+            for (int i = 0; i < img.width; i++)
+            {
+                img.values[i] = 1f;
+                samples.Add(new MetricSample { pixel = new Vector2(i, 0), depthMeters = i < correct ? 1.4f : 2.1f });
+            }
+            var alignment = new SelfAlignment { success = true, r = 0, hRel = 1 };
+            bool ok = new HeightClues(new DetectionConfig()).TryFromDepth(img, alignment, samples, 1, out var clue, out int used);
+            Assert.AreEqual(accepted, ok);
+            Assert.AreEqual(40, used);
+            if (accepted) Assert.AreEqual(1.4f, clue.heightMeters, 1e-5f);
+        }
+
         [Test]
         public void TooFewSamples_GiveNoClue_ButReportCount()
         {
